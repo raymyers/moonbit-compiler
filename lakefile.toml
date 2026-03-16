@@ -1,0 +1,11 @@
+name = "moonbit-semantics"
+version = "0.1.0"
+defaultTargets = ["MoonbitSemantics"]
+
+[[require]]
+name = "cslib"
+git = "https://github.com/leanprover/cslib"
+rev = "main"
+
+[[lean_lib]]
+name = "MoonbitSemantics"
