@@ -3,4 +3,5 @@ import MoonbitSemantics.Mcore.Syntax
 import MoonbitSemantics.Mcore.Values
 import MoonbitSemantics.Mcore.Semantics
 import MoonbitSemantics.Mcore.Typing
+import MoonbitSemantics.Mcore.Preservation
 import MoonbitSemantics.Mcore.Simulation
