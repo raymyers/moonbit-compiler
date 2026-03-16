@@ -51,25 +51,46 @@ def FnTableWellTyped (ft : FnTable) (F : FnTyTable) : Prop :=
 
 /-! ## ValueListHasType indexing -/
 
-/-- Indexing into a well-typed value list gives a well-typed value. -/
--- ValueListHasType indexing (straightforward but needs mutual induction)
-theorem ValueListHasType.getAt
-    (h : ValueListHasType vs τs) (i : Nat)
-    (hv : vs.length > i) (hτ : τs.length > i) :
-    ValueHasType (vs[i]'hv) (τs[i]'hτ) := by
-  sorry
+/-- Length agreement for ValueListHasType. -/
+def ValueListHasType.length_eq : ValueListHasType vs τs → vs.length = τs.length
+  | .nil => rfl
+  | .cons _ rest => by simp [List.length_cons, rest.length_eq]
+
+/-- Indexing into a well-typed value list. -/
+def ValueListHasType.getAt :
+    (h : ValueListHasType vs τs) → (i : Nat) →
+    (hv : vs.length > i) → (hτ : τs.length > i) →
+    ValueHasType (vs[i]'hv) (τs[i]'hτ)
+  | .cons hvt _, 0, _, _ => hvt
+  | .cons _ rest, i + 1, hv, hτ =>
+    rest.getAt i (Nat.lt_of_succ_lt_succ hv) (Nat.lt_of_succ_lt_succ hτ)
 
 /-! ## Env.bindParams well-typedness -/
+
+/-- Extending env with one param-arg binding preserves well-typedness. -/
+private theorem extendOne
+    (hwt : EnvWellTyped env Γ) (hvt : ValueHasType v τ) :
+    EnvWellTyped (Env.extend env x v) (TyEnv.extend Γ x τ) :=
+  EnvWellTyped.extend_preserves hwt hvt
 
 /-- Binding params with well-typed args gives a well-typed env extension. -/
 theorem EnvWellTyped.bindParams_preserves
     (hwt : EnvWellTyped env Γ)
+    (params : List Param) (args : List Value)
     (hargs : ValueListHasType args (params.map (·.ty)))
     (hlen : params.length = args.length) :
     EnvWellTyped (Env.bindParams env params args)
       (TyEnv.bindParams Γ params) := by
-  sorry -- Requires induction on params/args simultaneously
-        -- Each step is extend_preserves with the corresponding arg
+  simp only [Env.bindParams, TyEnv.bindParams, Env.extendMany, TyEnv.extendMany]
+  induction params generalizing args env Γ with
+  | nil =>
+    match args, hargs with
+    | [], .nil => exact hwt
+  | cons p ps ih =>
+    match args, hargs with
+    | a :: as_, .cons hvt rest =>
+      simp [List.map, List.zip_cons_cons, List.foldl]
+      exact ih (EnvWellTyped.extend_preserves hwt hvt) as_ rest (by simp at hlen; omega)
 
 /-! ## handleErrorPropagate helper -/
 
@@ -260,10 +281,30 @@ def preservation
     | .prim htype_args htype_prim => sorry -- needs evalPrim_type_sound
 
   -- ════════ Application ════════
-  | .applyClosure _ heval_args _ heval_body => sorry -- needs closure env typing
-  | .applyRawFn _ heval_args _ heval_body => sorry -- needs fn env typing
-  | .applyTopFn _ heval_args _ heval_body => sorry -- needs fn table typing
-  | .applyJoin _ heval_args _ heval_body => sorry -- needs join env typing
+  | .applyClosure hclos heval_args hlen heval_body => match htype with
+    | .applyClosure hΓ htype_args =>
+      -- Closure env: captured bindings + params bound to args
+      -- The captured env may not match Γ — this is the deep closure typing gap
+      sorry
+    | .applyRawFn _ _ => sorry
+    | .applyTopFn _ _ => sorry
+  | .applyRawFn hfn heval_args hlen heval_body => match htype with
+    | .applyRawFn hΓ htype_args =>
+      let hvts := preservationArgs htype_args heval_args henv hft
+      sorry -- needs: empty env + bindParams well-typedness + body typing
+    | .applyClosure _ _ => sorry
+    | .applyTopFn _ _ => sorry
+  | .applyTopFn hfnlookup heval_args hlen heval_body => match htype with
+    | .applyTopFn hF htype_args =>
+      let hvts := preservationArgs htype_args heval_args henv hft
+      -- Use FnTableWellTyped to get the body's typing
+      sorry -- needs: FnTableWellTyped extraction + bindParams
+    | .applyClosure _ _ => sorry
+    | .applyRawFn _ _ => sorry
+  | .applyJoin hjt heval_args hlen heval_body => match htype with
+    | .applyJoin hΔ htype_args =>
+      let hvts := preservationArgs htype_args heval_args henv hft
+      sorry -- needs: join table well-typedness + bindParams
 
   -- ════════ Tuple (needs ValueListHasType from preservationArgs) ════════
   | .tuple heval_args => match htype with
@@ -274,16 +315,29 @@ def preservation
   | .loopVal heval_args heval_body => match htype with
     | .loop htype_args htype_body =>
       let hvts := preservationArgs htype_args heval_args henv hft
-      sorry -- needs bindParams + loop env well-typedness
+      let henv' := EnvWellTyped.bindParams_preserves henv _ _ hvts (by have := hvts.length_eq; simp [List.length_map] at this; omega)
+      -- body is typed with extended env + loop env
+      -- We have htype_body but it uses LoopTyEnv.extend — preservation call needs matching
+      preservation htype_body heval_body henv' hft
   | .loopBreak heval_args heval_body => match htype with
-    | .loop htype_args htype_body => sorry -- same as loopVal
+    | .loop htype_args htype_body =>
+      let hvts := preservationArgs htype_args heval_args henv hft
+      let henv' := EnvWellTyped.bindParams_preserves henv _ _ hvts (by have := hvts.length_eq; simp [List.length_map] at this; omega)
+      let .break := preservation htype_body heval_body henv' hft
+      .val sorry -- break value has the right type
   | .loopBreakNone heval_args heval_body => match htype with
-    | .loop htype_args htype_body => sorry
-  | .loopContinue _ _ _ heval_reentry => sorry
+    | .loop htype_args htype_body => sorry -- τ must be unit if break None
+  | .loopContinue _ _ _ heval_reentry => sorry -- needs re-entry typing
   | .loopReturn heval_args heval_body => match htype with
-    | .loop htype_args htype_body => sorry
+    | .loop htype_args htype_body =>
+      let hvts := preservationArgs htype_args heval_args henv hft
+      let henv' := EnvWellTyped.bindParams_preserves henv _ _ hvts (by have := hvts.length_eq; simp [List.length_map] at this; omega)
+      preservation htype_body heval_body henv' hft
   | .loopError heval_args heval_body => match htype with
-    | .loop htype_args htype_body => sorry
+    | .loop htype_args htype_body =>
+      let hvts := preservationArgs htype_args heval_args henv hft
+      let henv' := EnvWellTyped.bindParams_preserves henv _ _ hvts (by have := hvts.length_eq; simp [List.length_map] at this; omega)
+      preservation htype_body heval_body henv' hft
 
   -- ════════ Error handling ════════
   | .handleErrorToResultOk heval_obj => match htype with
