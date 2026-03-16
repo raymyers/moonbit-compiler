@@ -378,9 +378,15 @@ inductive HasType :
     HasType Γ Δ Λ F e τ →
     HasType Γ Δ Λ F (.return e .singleValue) τ
 
-  | returnErrorResult :
+  /-- return Ok: sub-expression value is returned, so its type must match. -/
+  | returnOk :
     HasType Γ Δ Λ F e τ →
-    HasType Γ Δ Λ F (.return e (.errorResult isErr retTy)) retTy
+    HasType Γ Δ Λ F (.return e (.errorResult false τ)) τ
+
+  /-- return Error: raises an error, so the return type can be anything. -/
+  | returnErr :
+    HasType Γ Δ Λ F e errTy →
+    HasType Γ Δ Λ F (.return e (.errorResult true retTy)) retTy
 
   -- ═══════════ Objects ═══════════
 

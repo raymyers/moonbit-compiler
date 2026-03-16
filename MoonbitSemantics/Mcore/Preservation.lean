@@ -120,6 +120,17 @@ The three functions recurse on strictly smaller sub-derivations:
 - `preservationAbort` is non-recursive (abort outcomes are trivially typed).
 -/
 
+/-! ## evalPrim type soundness -/
+
+/-- evalPrim preserves types: each prim case returns the declared type.
+    Proof requires exhaustive case analysis on (op, argTys, args). -/
+theorem evalPrim_type_sound
+    (heval : evalPrim op args = some v)
+    (hargs : ValueListHasType args argTys)
+    (hprim : typeOfPrim op argTys = some τ) :
+    ValueHasType v τ := by
+  sorry -- ~30 mechanical cases, each trivially .const/.unit/identity
+
 set_option maxHeartbeats 1600000 in
 set_option maxRecDepth 1024 in
 mutual
@@ -272,7 +283,9 @@ def preservation
 
   -- ════════ Prim ════════
   | .prim heval_args hprim => match htype with
-    | .prim htype_args htype_prim => sorry -- needs evalPrim_type_sound
+    | .prim htype_args htype_prim =>
+      let hvts := preservationArgs htype_args heval_args henv hft
+      .val (evalPrim_type_sound hprim hvts htype_prim)
 
   -- ════════ Application ════════
   -- Apply cases: all need closure/fn env well-typedness (deep infrastructure)
@@ -333,13 +346,9 @@ def preservation
   | .returnSingle heval_e => match htype with
     | .returnSingle htype_e => preservation htype_e heval_e henv hft
   | .returnError heval_e => match htype with
-    | .returnErrorResult _ => .error
+    | .returnErr _ => .error
   | .returnOk heval_e => match htype with
-    | .returnErrorResult htype_e =>
-      -- returnOk produces (.val v), and the type rule says return type is retTy
-      -- but we need to show ValueHasType v retTy. The sub-expression has type τ
-      -- but the return type annotation is retTy. These must match.
-      sorry -- needs: sub-expression type = return annotation type
+    | .returnOk htype_e => preservation htype_e heval_e henv hft
 
 def preservation_val
     (htype : HasType Γ Δ Λ F e τ)
