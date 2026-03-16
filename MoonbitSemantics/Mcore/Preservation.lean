@@ -261,18 +261,12 @@ def preservation
       sorry
 
   -- ════════ Switch ════════
-  | .switchConstr heval_obj hfind heval_branch => match htype with
-    | .switchConstrCase _ _ htype_branch =>
-      -- The branch is typed in an env that may be extended with the binder.
-      -- The eval also uses the same extended env (from Eval.switchConstr).
-      -- We need to show the eval env matches the typing env.
-      sorry -- needs: match binder env extension well-typedness
-    | .switchConstrDefault _ _ => sorry
+  -- Switch cases: need env extension for binder + branch typing extraction
+  | .switchConstr _ _ _ => sorry
   | .switchConstrDefault heval_obj _ heval_dflt => match htype with
     | .switchConstrDefault _ htype_dflt => preservation htype_dflt heval_dflt henv hft
-    | .switchConstrCase _ _ _ => sorry
-  | .switchConstantMatch _ _ heval_branch => match htype with
-    | .switchConstant _ _ _ => sorry -- needs branch typing extraction
+    | .switchConstrCase _ _ _ => sorry -- typing says case matches but eval says default
+  | .switchConstantMatch _ _ _ => sorry
   | .switchConstantDefault _ _ heval_dflt => match htype with
     | .switchConstant _ _ htype_dflt => preservation htype_dflt heval_dflt henv hft
 
@@ -281,30 +275,11 @@ def preservation
     | .prim htype_args htype_prim => sorry -- needs evalPrim_type_sound
 
   -- ════════ Application ════════
-  | .applyClosure hclos heval_args hlen heval_body => match htype with
-    | .applyClosure hΓ htype_args =>
-      -- Closure env: captured bindings + params bound to args
-      -- The captured env may not match Γ — this is the deep closure typing gap
-      sorry
-    | .applyRawFn _ _ => sorry
-    | .applyTopFn _ _ => sorry
-  | .applyRawFn hfn heval_args hlen heval_body => match htype with
-    | .applyRawFn hΓ htype_args =>
-      let hvts := preservationArgs htype_args heval_args henv hft
-      sorry -- needs: empty env + bindParams well-typedness + body typing
-    | .applyClosure _ _ => sorry
-    | .applyTopFn _ _ => sorry
-  | .applyTopFn hfnlookup heval_args hlen heval_body => match htype with
-    | .applyTopFn hF htype_args =>
-      let hvts := preservationArgs htype_args heval_args henv hft
-      -- Use FnTableWellTyped to get the body's typing
-      sorry -- needs: FnTableWellTyped extraction + bindParams
-    | .applyClosure _ _ => sorry
-    | .applyRawFn _ _ => sorry
-  | .applyJoin hjt heval_args hlen heval_body => match htype with
-    | .applyJoin hΔ htype_args =>
-      let hvts := preservationArgs htype_args heval_args henv hft
-      sorry -- needs: join table well-typedness + bindParams
+  -- Apply cases: all need closure/fn env well-typedness (deep infrastructure)
+  | .applyClosure _ _ _ _ => sorry
+  | .applyRawFn _ _ _ _ => sorry
+  | .applyTopFn _ _ _ _ => sorry
+  | .applyJoin _ _ _ _ => sorry
 
   -- ════════ Tuple (needs ValueListHasType from preservationArgs) ════════
   | .tuple heval_args => match htype with
