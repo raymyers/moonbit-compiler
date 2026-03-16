@@ -49,6 +49,42 @@ def FnTableWellTyped (ft : FnTable) (F : FnTyTable) : Prop :=
       HasType (TyEnv.bindParams TyEnv.empty params)
         JoinTyEnv.empty LoopTyEnv.empty F body retTy
 
+/-! ## ValueListHasType indexing -/
+
+/-- Indexing into a well-typed value list gives a well-typed value. -/
+-- ValueListHasType indexing (straightforward but needs mutual induction)
+theorem ValueListHasType.getAt
+    (h : ValueListHasType vs τs) (i : Nat)
+    (hv : vs.length > i) (hτ : τs.length > i) :
+    ValueHasType (vs[i]'hv) (τs[i]'hτ) := by
+  sorry
+
+/-! ## Env.bindParams well-typedness -/
+
+/-- Binding params with well-typed args gives a well-typed env extension. -/
+theorem EnvWellTyped.bindParams_preserves
+    (hwt : EnvWellTyped env Γ)
+    (hargs : ValueListHasType args (params.map (·.ty)))
+    (hlen : params.length = args.length) :
+    EnvWellTyped (Env.bindParams env params args)
+      (TyEnv.bindParams Γ params) := by
+  sorry -- Requires induction on params/args simultaneously
+        -- Each step is extend_preserves with the corresponding arg
+
+/-! ## handleErrorPropagate helper -/
+
+/-- An outcome that is neither val nor error must be break/continue/return. -/
+def OutcomeHasType.ofNotValNotError
+    (hnotval : ∀ v, outcome ≠ .val v)
+    (hnoterr : ∀ v, outcome ≠ .error v) :
+    OutcomeHasType outcome τ :=
+  match outcome with
+  | .val v => absurd rfl (hnotval v)
+  | .break _ _ => .break
+  | .continue _ _ => .continue
+  | .return _ => .return
+  | .error v => absurd rfl (hnoterr v)
+
 /-! ## Inversion lemma: extract ValueHasType from OutcomeHasType (.val v) -/
 
 def OutcomeHasType.getVal : OutcomeHasType (.val v) τ → ValueHasType v τ
@@ -191,16 +227,25 @@ def preservation
   | .seq heval_exprs heval_last => match htype with
     | .seq _ htype_last => preservation htype_last heval_last henv hft
 
-  | .fieldTuple heval_rec hfield => sorry -- needs ValueListHasType indexing
-  | .fieldConstr heval_rec _ => sorry -- needs constr field typing
-  | .fieldRecord heval_rec _ _ => sorry -- needs store typing
+  | .fieldTuple heval_rec hfield => sorry -- needs accessor pattern + ValueListHasType.get
+  | .fieldConstr heval_rec _ => sorry
+  | .fieldRecord heval_rec _ _ => sorry
 
   | .object heval_self => match htype with
-    | .object htype_self => sorry -- need trait typing
+    | .object htype_self =>
+      -- The Eval.object rule just evaluates self and returns its value.
+      -- But HasType.object says the result type is (.trait tid), not selfTy.
+      -- This is a genuine type gap: the eval returns self's value but the
+      -- typing says it should be a trait. Need vtable wrapping in eval.
+      sorry
 
   -- ════════ Switch ════════
   | .switchConstr heval_obj hfind heval_branch => match htype with
-    | .switchConstrCase _ _ htype_branch => sorry -- needs env extension for binder
+    | .switchConstrCase _ _ htype_branch =>
+      -- The branch is typed in an env that may be extended with the binder.
+      -- The eval also uses the same extended env (from Eval.switchConstr).
+      -- We need to show the eval env matches the typing env.
+      sorry -- needs: match binder env extension well-typedness
     | .switchConstrDefault _ _ => sorry
   | .switchConstrDefault heval_obj _ heval_dflt => match htype with
     | .switchConstrDefault _ htype_dflt => preservation htype_dflt heval_dflt henv hft
@@ -226,12 +271,19 @@ def preservation
       .val (.tuple (preservationArgs htype_args heval_args henv hft))
 
   -- ════════ Loop ════════
-  | .loopVal heval_args heval_body => sorry -- needs loop env typing
-  | .loopBreak heval_args heval_body => sorry
-  | .loopBreakNone heval_args heval_body => sorry
+  | .loopVal heval_args heval_body => match htype with
+    | .loop htype_args htype_body =>
+      let hvts := preservationArgs htype_args heval_args henv hft
+      sorry -- needs bindParams + loop env well-typedness
+  | .loopBreak heval_args heval_body => match htype with
+    | .loop htype_args htype_body => sorry -- same as loopVal
+  | .loopBreakNone heval_args heval_body => match htype with
+    | .loop htype_args htype_body => sorry
   | .loopContinue _ _ _ heval_reentry => sorry
-  | .loopReturn heval_args heval_body => sorry
-  | .loopError heval_args heval_body => sorry
+  | .loopReturn heval_args heval_body => match htype with
+    | .loop htype_args htype_body => sorry
+  | .loopError heval_args heval_body => match htype with
+    | .loop htype_args htype_body => sorry
 
   -- ════════ Error handling ════════
   | .handleErrorToResultOk heval_obj => match htype with
@@ -245,7 +297,8 @@ def preservation
     | .handleErrorReturnErr htype_obj => preservation htype_obj heval_obj henv hft
   | .handleErrorReturnErrErr heval_obj => match htype with
     | .handleErrorReturnErr _ => .error
-  | .handleErrorPropagate _ hnotval hnoterr => sorry -- needs case analysis
+  | .handleErrorPropagate _ hnotval hnoterr =>
+    OutcomeHasType.ofNotValNotError hnotval hnoterr
 
   -- ════════ Return ════════
   | .returnSingle heval_e => match htype with
@@ -253,7 +306,11 @@ def preservation
   | .returnError heval_e => match htype with
     | .returnErrorResult _ => .error
   | .returnOk heval_e => match htype with
-    | .returnErrorResult htype_e => sorry -- needs return type
+    | .returnErrorResult htype_e =>
+      -- returnOk produces (.val v), and the type rule says return type is retTy
+      -- but we need to show ValueHasType v retTy. The sub-expression has type τ
+      -- but the return type annotation is retTy. These must match.
+      sorry -- needs: sub-expression type = return annotation type
 
 def preservation_val
     (htype : HasType Γ Δ Λ F e τ)
