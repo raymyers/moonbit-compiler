@@ -113,6 +113,19 @@ inductive Eval (fnTable : FnTable) :
       body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letfn name params fnBody body .nontailJoin) outcome s₁ nl₁
 
+  /-- Recursive local function: the closure's captured env includes itself. -/
+  | letfnRec :
+    Eval fnTable
+      (Env.extend env name (Value.closure ((name, Value.unit) :: Env.capture env freeVars) params fnBody))
+      s jt lt nl body outcome s₁ nl₁ →
+    Eval fnTable env s jt lt nl (.letfn name params fnBody body .recursive) outcome s₁ nl₁
+
+  /-- Mutually recursive bindings: all closures share the recursive env. -/
+  | letrec :
+    Eval fnTable
+      (Env.extendMany env (bindings.map fun (v, ps, b) => (v, Value.closure (Env.capture env freeVars) ps b)))
+      s jt lt nl body outcome s₁ nl₁ →
+    Eval fnTable env s jt lt nl (.letrec bindings body) outcome s₁ nl₁
 
   /-- Call a closure value. -/
   | applyClosure :
@@ -164,6 +177,18 @@ inductive Eval (fnTable : FnTable) :
       (Store.alloc s₁ nl₁ (.record fieldVals.toArray
         ((fieldExprs.map fun (_, _, m, _) => m).toArray)))
       (nl₁ + 1)
+
+  /-- Record update: copy a record, overwriting specified fields. -/
+  | recordUpdate :
+    Eval fnTable env s jt lt nl rec_ (.val (.loc l)) s₁ nl₁ →
+    s₁ l = some (.record oldFields mutFlags) →
+    EvalArgs fnTable env s₁ jt lt nl₁ (updFields.map fun (_, _, _, e) => e) newVals s₂ nl₂ →
+    updatedFields = (updFields.zip newVals).foldl
+      (fun acc ((_, pos, _, _), v) => acc.setIfInBounds pos v) oldFields →
+    Eval fnTable env s jt lt nl (.recordUpdate rec_ updFields fieldsNum)
+      (.val (.loc nl₂))
+      (Store.alloc s₂ nl₂ (.record updatedFields mutFlags))
+      (nl₂ + 1)
 
   /-- Array construction: allocate on the heap. -/
   | array :
@@ -262,6 +287,30 @@ inductive Eval (fnTable : FnTable) :
       (LoopTable.extend lt label ⟨params, body⟩) nl₁ body (.val v) sr nlr →
     Eval fnTable env s jt lt nl (.loop params body argExprs label) (.val v) sr nlr
 
+  /-- Loop: body does `break` with matching label — exit loop with value. -/
+  | loopBreak :
+    EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
+    Eval fnTable (Env.bindParams env params argVals) s₁ jt
+      (LoopTable.extend lt label ⟨params, body⟩) nl₁ body (.break (some v) label) sr nlr →
+    Eval fnTable env s jt lt nl (.loop params body argExprs label) (.val v) sr nlr
+
+  /-- Loop: body does `break none` with matching label — exit with unit. -/
+  | loopBreakNone :
+    EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
+    Eval fnTable (Env.bindParams env params argVals) s₁ jt
+      (LoopTable.extend lt label ⟨params, body⟩) nl₁ body (.break none label) sr nlr →
+    Eval fnTable env s jt lt nl (.loop params body argExprs label) (.val .unit) sr nlr
+
+  /-- Loop: body does `continue` with matching label — re-enter with new args. -/
+  | loopContinue :
+    EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
+    Eval fnTable (Env.bindParams env params argVals) s₁ jt
+      (LoopTable.extend lt label ⟨params, body⟩) nl₁ body (.continue newVals label) s₂ nl₂ →
+    -- Re-enter the loop with new values (big-step: tail-recurse into same loop rule)
+    Eval fnTable (Env.bindParams env params newVals) s₂ jt
+      (LoopTable.extend lt label ⟨params, body⟩) nl₂ body (.val v) sr nlr →
+    Eval fnTable env s jt lt nl (.loop params body argExprs label) (.val v) sr nlr
+
   /-- Break: signal loop exit. -/
   | breakSome :
     Eval fnTable env s jt lt nl arg (.val v) s₁ nl₁ →
@@ -317,6 +366,33 @@ inductive Eval (fnTable : FnTable) :
     Eval fnTable env s jt lt nl e (.val v) s₁ nl₁ →
     Eval fnTable env s jt lt nl (.return e .singleValue) (.val v) s₁ nl₁
 
+  /-- return Error_result (is_error = true): signal error. -/
+  | returnError :
+    Eval fnTable env s jt lt nl e (.val v) s₁ nl₁ →
+    Eval fnTable env s jt lt nl (.return e (.errorResult true retTy)) (.error v) s₁ nl₁
+
+  /-- return Error_result (is_error = false): normal return. -/
+  | returnOk :
+    Eval fnTable env s jt lt nl e (.val v) s₁ nl₁ →
+    Eval fnTable env s jt lt nl (.return e (.errorResult false retTy)) (.val v) s₁ nl₁
+
+  /-- handle_error Joinapply: on error, jump to join point. -/
+  | handleErrorJoinErr :
+    Eval fnTable env s jt lt nl obj (.error v) s₁ nl₁ →
+    jt target = some ⟨jparams, jbody⟩ →
+    Eval fnTable (Env.bindParams env jparams [v]) s₁ jt lt nl₁ jbody outcome sr nlr →
+    Eval fnTable env s jt lt nl (.handleError obj (.joinapply target)) outcome sr nlr
+
+  /-- handle_error Return_err: on error, propagate. -/
+  | handleErrorReturnErrOk :
+    Eval fnTable env s jt lt nl obj (.val v) s₁ nl₁ →
+    Eval fnTable env s jt lt nl (.handleError obj (.returnErr _)) (.val v) s₁ nl₁
+
+  /-- handle_error Return_err: on error, re-raise. -/
+  | handleErrorReturnErrErr :
+    Eval fnTable env s jt lt nl obj (.error v) s₁ nl₁ →
+    Eval fnTable env s jt lt nl (.handleError obj (.returnErr _)) (.error v) s₁ nl₁
+
 end -- mutual
 
 /-! ## CSLib Integration -/
@@ -371,5 +447,37 @@ theorem add_correct (env : Env) (s : Store) (jt : JoinTable) (lt : LoopTable)
   apply Eval.prim
   · exact EvalArgs.cons Eval.const (EvalArgs.cons Eval.const EvalArgs.nil)
   · simp [Moonbit.Mcore.evalPrim]
+
+/-- Let-binding composes evaluation: if rhs evals and body evals, let evals. -/
+theorem let_compose (ft : FnTable) (env : Env) (s : Store) (jt : JoinTable) (lt : LoopTable)
+    (nl : Loc) (x : Var) (a b : Int) (body : Expr) (outcome : Outcome) (s₂ : Store) (nl₂ : Loc)
+    (hbody : Eval ft (Env.extend env x (.const (.int (a + b)))) s jt lt nl body outcome s₂ nl₂) :
+    Eval ft env s jt lt nl
+      (.let x (.prim (.arith .add) [.const (.int a), .const (.int b)]) body) outcome s₂ nl₂ := by
+  exact Eval.let (add_correct env s jt lt ft nl a b) hbody
+
+/-- Short-circuit AND: false && _ = false (without evaluating RHS). -/
+theorem and_short_circuit (ft : FnTable) (env : Env) (s : Store) (jt : JoinTable) (lt : LoopTable)
+    (nl : Loc) (rhs : Expr) :
+    Eval ft env s jt lt nl
+      (.and (.const (.bool false)) rhs)
+      (.val (.const (.bool false))) s nl :=
+  Eval.andFalse Eval.const
+
+/-- Short-circuit OR: true || _ = true (without evaluating RHS). -/
+theorem or_short_circuit (ft : FnTable) (env : Env) (s : Store) (jt : JoinTable) (lt : LoopTable)
+    (nl : Loc) (rhs : Expr) :
+    Eval ft env s jt lt nl
+      (.or (.const (.bool true)) rhs)
+      (.val (.const (.bool true))) s nl :=
+  Eval.orTrue Eval.const
+
+/-- If-true evaluates only the true branch. -/
+theorem if_true_branch (ft : FnTable) (env : Env) (s : Store) (jt : JoinTable) (lt : LoopTable)
+    (nl : Loc) (ifso ifnot : Expr) (outcome : Outcome) (sr : Store) (nlr : Loc)
+    (hbranch : Eval ft env s jt lt nl ifso outcome sr nlr) :
+    Eval ft env s jt lt nl
+      (.if (.const (.bool true)) ifso (some ifnot)) outcome sr nlr :=
+  Eval.ifTrue Eval.const hbranch
 
 end Moonbit.Mcore
