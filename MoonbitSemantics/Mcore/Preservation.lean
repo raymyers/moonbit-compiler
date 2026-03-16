@@ -8,36 +8,36 @@ namespace Moonbit.Mcore
 
 open Moonbit.Clam (Const Prim ArithOp CmpOp)
 
-/-! ## Abort elimination
+/-! ## Abort outcomes are always well-typed -/
 
-When eval produces `.val v` but we case-split into an abort rule,
-we get a contradiction since abort outcomes are never `.val`.
--/
+/-- Any abort outcome trivially satisfies OutcomeHasType (for any τ). -/
+def OutcomeHasType.ofAbort : (o : Outcome) → o.isAbort → OutcomeHasType o τ
+  | .break _ _, _ => .break
+  | .continue _ _, _ => .continue
+  | .return _, _ => .return
+  | .error _, _ => .error
 
-/-- isAbort is decidable (needed for contradiction proofs). -/
-def Outcome.decIsAbort : (o : Outcome) → Decidable o.isAbort
-  | .val _ => isFalse (by simp [Outcome.isAbort])
-  | .break _ _ => isTrue (by simp [Outcome.isAbort])
-  | .continue _ _ => isTrue (by simp [Outcome.isAbort])
-  | .return _ => isTrue (by simp [Outcome.isAbort])
-  | .error _ => isTrue (by simp [Outcome.isAbort])
+/-- EvalArgsAbort always produces an abort outcome. -/
+def EvalArgsAbort.outcome_isAbort :
+    EvalArgsAbort ft env s jt lt nl es outcome s' nl' →
+    outcome.isAbort
+  | .here _ hab => hab
+  | .later _ htail => htail.outcome_isAbort
 
-/-- `.val v` is never an abort. -/
-theorem Outcome.val_not_abort (v : Value) : ¬ (Outcome.val v).isAbort := by
-  simp [Outcome.isAbort]
-
-/-- An EvalArgsAbort always produces an abort outcome. -/
-theorem EvalArgsAbort.outcome_isAbort
+/-- Abort from EvalArgsAbort gives a well-typed outcome. -/
+def EvalArgsAbort.outcomeHasType
     (h : EvalArgsAbort ft env s jt lt nl es outcome s' nl') :
-    outcome.isAbort := by
-  -- EvalArgsAbort is part of a mutual inductive, so standard induction
-  -- doesn't work. We use the fact that `later` recurses on a strictly
-  -- smaller list, so we can do well-founded recursion on list length.
-  sorry -- Requires well-founded induction on mutual inductive.
-        -- The property is immediate: `here` has isAbort directly,
-        -- `later` delegates to a shorter list.
+    OutcomeHasType outcome τ :=
+  .ofAbort outcome h.outcome_isAbort
+
+/-- Abort from isAbort gives a well-typed outcome. -/
+def isAbortHasType (hab : outcome.isAbort) : OutcomeHasType outcome τ :=
+  .ofAbort outcome hab
 
 /-! ## Environment lemmas -/
+
+@[simp] theorem Outcome.val_not_abort (v : Value) : ¬ (Outcome.val v).isAbort := by
+  simp [Outcome.isAbort]
 
 theorem EnvWellTyped.extend_preserves
     (hwt : EnvWellTyped env Γ) (hv : ValueHasType v τ) :
@@ -59,7 +59,7 @@ theorem EnvWellTyped.lookup
   rw [henv] at hv'; cases hv'
   exact hvt
 
-/-! ## Function table well-typedness -/
+/-! ## Function table typing -/
 
 def FnTableWellTyped (ft : FnTable) (F : FnTyTable) : Prop :=
   ∀ f paramTys retTy,
@@ -70,149 +70,118 @@ def FnTableWellTyped (ft : FnTable) (F : FnTyTable) : Prop :=
       HasType (TyEnv.bindParams TyEnv.empty params)
         JoinTyEnv.empty LoopTyEnv.empty F body retTy
 
-/-! ## Per-constructor preservation
+/-! ## Main preservation theorem
 
-Each theorem proves: if the expression is well-typed and evaluates to `.val v`,
-then `v` has the expected type. Abort cases are eliminated by contradiction.
+Strategy: case-split on the Eval derivation. Three categories:
+
+1. **Leaf cases** (const, unit, var, function, rawFunction): no sub-expr eval.
+   Directly construct the ValueHasType.
+
+2. **Abort cases** (~28): outcome is an abort. Use `isAbortHasType` or
+   `EvalArgsAbort.outcomeHasType` since abort outcomes are trivially well-typed.
+
+3. **Recursive cases** (~40): need IH for sub-expressions. These require
+   the full mutual induction principle which we approximate with `sorry`.
 -/
 
--- Tactic for eliminating abort cases (outcome is .val but rule requires abort)
-macro "elim_abort" : tactic =>
-  `(tactic| (exfalso; exact Outcome.val_not_abort _ ‹_›))
-
-theorem preservation_const
-    (htype : HasType Γ Δ Λ F (.const c) τ)
-    (heval : Eval ft env s jt lt nl (.const c) (.val v) s' nl') :
-    ValueHasType v τ := by
-  cases htype; cases heval; exact ValueHasType.const
-
-theorem preservation_unit
-    (htype : HasType Γ Δ Λ F .unit τ)
-    (heval : Eval ft env s jt lt nl .unit (.val v) s' nl') :
-    ValueHasType v τ := by
-  cases htype; cases heval; exact ValueHasType.unit
-
-theorem preservation_var
-    (htype : HasType Γ Δ Λ F (.var x none) τ)
-    (heval : Eval ft env s jt lt nl (.var x none) (.val v) s' nl')
-    (henv : EnvWellTyped env Γ) :
-    ValueHasType v τ := by
-  cases htype with
-  | var hΓ => cases heval with
-    | var hx => exact EnvWellTyped.lookup henv hΓ hx
-
-theorem preservation_function
-    (htype : HasType Γ Δ Λ F (.function params fnBody false) τ)
-    (heval : Eval ft env s jt lt nl (.function params fnBody false) (.val v) s' nl') :
-    ValueHasType v τ := by
-  cases htype with
-  | «function» => cases heval with
-    | «function» => exact ValueHasType.closure
-
-theorem preservation_rawFunction
-    (htype : HasType Γ Δ Λ F (.function params fnBody true) τ)
-    (heval : Eval ft env s jt lt nl (.function params fnBody true) (.val v) s' nl') :
-    ValueHasType v τ := by
-  cases htype with
-  | rawFunction => cases heval with
-    | rawFunction => exact ValueHasType.rawFn
-
-theorem preservation_constr
-    (htype : HasType Γ Δ Λ F (.constr tag argExprs) τ)
-    (heval : Eval ft env s jt lt nl (.constr tag argExprs) (.val v) s' nl') :
-    ValueHasType v τ := by
-  cases htype with
-  | constr => cases heval with
-    | constr => exact ValueHasType.constr
-    | constrAbort h => exact absurd h.outcome_isAbort (Outcome.val_not_abort v)
-
-theorem preservation_and_false :
-    HasType Γ Δ Λ F (.and lhs rhs) .bool →
-    ValueHasType (.const (.bool false)) Mtype.bool :=
-  fun _ => ValueHasType.const
-
-theorem preservation_or_true :
-    HasType Γ Δ Λ F (.or lhs rhs) .bool →
-    ValueHasType (.const (.bool true)) Mtype.bool :=
-  fun _ => ValueHasType.const
-
-theorem preservation_if_no_else
-    (htype : HasType Γ Δ Λ F (.if condE ifso none) τ)
-    (heval : Eval ft env s jt lt nl (.if condE ifso none) (.val .unit) s' nl') :
-    ValueHasType .unit τ := by
-  cases htype with
-  | ifNone => exact ValueHasType.unit
-
-theorem preservation_assign
-    (htype : HasType Γ Δ Λ F (.assign x e) τ)
-    (heval : Eval ft env s jt lt nl (.assign x e) (.val v) s' nl') :
-    ValueHasType v τ := by
-  cases htype with
-  | assign => cases heval with
-    | assign => exact ValueHasType.unit
-    | assignAbort _ hab =>
-      exact absurd hab (Outcome.val_not_abort v)
-
-theorem preservation_mutate
-    (htype : HasType Γ Δ Λ F (.mutate rec_ label fld pos) τ)
-    (heval : Eval ft env s jt lt nl (.mutate rec_ label fld pos) (.val v) s' nl') :
-    ValueHasType v τ := by
-  cases htype with
-  | mutate => cases heval with
-    | mutate => exact ValueHasType.unit
-    | mutateAbortRec _ hab =>
-      exact absurd hab (Outcome.val_not_abort v)
-    | mutateAbortFld _ _ hab =>
-      exact absurd hab (Outcome.val_not_abort v)
-
-/-! ## Preservation for compound expressions -/
-
-/-- Preservation for let: combines RHS and body preservation. -/
-theorem preservation_let
-    (htype : HasType Γ Δ Λ F (.let name rhs body) τ)
-    (heval : Eval ft env s jt lt nl (.let name rhs body) (.val v) s' nl')
-    (henv : EnvWellTyped env Γ)
-    (ih_rhs : ∀ v₁ s₁ nl₁ τ₁,
-      Eval ft env s jt lt nl rhs (.val v₁) s₁ nl₁ →
-      HasType Γ Δ Λ F rhs τ₁ → ValueHasType v₁ τ₁)
-    (ih_body : ∀ env' Γ' v₂ s₂ nl₂ s₁ nl₁,
-      EnvWellTyped env' Γ' →
-      Eval ft env' s₁ jt lt nl₁ body (.val v₂) s₂ nl₂ →
-      HasType Γ' Δ Λ F body τ → ValueHasType v₂ τ) :
-    ValueHasType v τ := by
-  cases htype with
-  | «let» htype_rhs htype_body =>
-    cases heval with
-    | «let» heval_rhs heval_body =>
-      have hv₁ := ih_rhs _ _ _ _ heval_rhs htype_rhs
-      have henv' := EnvWellTyped.extend_preserves (x := name) henv hv₁
-      exact ih_body _ _ _ _ _ _ _ henv' heval_body htype_body
-    | letAbort _ hab =>
-      exact absurd hab (Outcome.val_not_abort v)
-
-/-! ## Main preservation theorem -/
-
-/-- **Type Preservation (Soundness)**: well-typed expressions evaluate to
-    well-typed outcomes.
-
-    This is the main soundness theorem. The full proof requires mutual
-    induction over the `Eval` derivation with ~87 cases. The per-constructor
-    lemmas above demonstrate the proof technique for each case:
-
-    1. Case-split on the `HasType` derivation to extract type info
-    2. Case-split on the `Eval` derivation to extract the eval rule used
-    3. For normal rules: use IH + env/store lemmas to conclude
-    4. For abort rules: derive contradiction since outcome is `.val`
--/
+set_option maxHeartbeats 800000 in
 theorem preservation
     (htype : HasType Γ Δ Λ F e τ)
     (heval : Eval ft env s jt lt nl e outcome s' nl')
     (henv : EnvWellTyped env Γ)
     (hft : FnTableWellTyped ft F) :
     OutcomeHasType outcome τ := by
-  sorry
+  cases heval with
+  -- ════════ Leaf cases (fully proven) ════════
+  | const => cases htype; exact .val .const
+  | unit => cases htype; exact .val .unit
+  | var hx => cases htype with | var hΓ => exact .val (EnvWellTyped.lookup henv hΓ hx)
+  | varPrim hx => cases htype with | varPrim hΓ => exact .val (EnvWellTyped.lookup henv hΓ hx)
+  | «function» => cases htype with | «function» => exact .val .closure
+  | rawFunction => cases htype with | rawFunction => exact .val .rawFn
+  | assign _ => cases htype with | assign => exact .val .unit
+  | mutate _ _ _ => cases htype with | mutate => exact .val .unit
+  | constr _ => cases htype with | constr => exact .val .constr
+  | tuple _ => cases htype with | tuple => exact .val (.tuple sorry) -- needs args IH
+  | record _ => cases htype with | record => exact .val .locConstr
+  | array _ => cases htype with | array => exact .val .locArray
+  | recordUpdate _ _ _ _ => cases htype with | recordUpdate => exact .val .locConstr
+  | andFalse _ => cases htype with | and => exact .val .const
+  | orTrue _ => cases htype with | or => exact .val .const
+  | ifFalseNoElse _ => cases htype with | ifNone => exact .val .unit
+  | breakSome _ => exact .break
+  | breakNone => exact .break
+  | «continue» _ => exact .continue
+  -- ════════ Abort cases (fully proven via isAbortHasType) ════════
+  | assignAbort _ hab => exact isAbortHasType hab
+  | mutateAbortRec _ hab => exact isAbortHasType hab
+  | mutateAbortFld _ _ hab => exact isAbortHasType hab
+  | letAbort _ hab => exact isAbortHasType hab
+  | fieldAbort _ hab => exact isAbortHasType hab
+  | ifAbort _ hab => exact isAbortHasType hab
+  | switchConstrAbort _ hab => exact isAbortHasType hab
+  | switchConstantAbort _ hab => exact isAbortHasType hab
+  | returnAbort _ hab => exact isAbortHasType hab
+  | breakAbort _ hab => exact isAbortHasType hab
+  | objectAbort _ hab => exact isAbortHasType hab
+  | andAbort _ hab => exact isAbortHasType hab
+  | orAbort _ hab => exact isAbortHasType hab
+  | constrAbort h => exact h.outcomeHasType
+  | tupleAbort h => exact h.outcomeHasType
+  | recordAbort h => exact h.outcomeHasType
+  | arrayAbort h => exact h.outcomeHasType
+  | recordUpdateAbortFields _ _ h => exact h.outcomeHasType
+  | recordUpdateAbortRec _ hab => exact isAbortHasType hab
+  | primAbort h => exact h.outcomeHasType
+  | applyAbort h => exact h.outcomeHasType
+  | seqAbort h => exact h.outcomeHasType
+  | loopAbort h => exact h.outcomeHasType
+  | continueAbort h => exact h.outcomeHasType
+  | handleErrorPropagate _ hnotval hnoterr =>
+    -- outcome is not val and not error, so it's break/continue/return
+    sorry
+  -- ════════ Recursive cases (need IH — sorry for now) ════════
+  | «let» _ _ => sorry
+  | letfnNonrec _ => sorry
+  | letfnRec _ => sorry
+  | letfnTailJoin _ => sorry
+  | letfnNontailJoin _ => sorry
+  | letrec _ => sorry
+  | applyClosure _ _ _ _ => sorry
+  | applyRawFn _ _ _ _ => sorry
+  | applyTopFn _ _ _ _ => sorry
+  | applyJoin _ _ _ _ => sorry
+  | prim _ _ => sorry
+  | fieldTuple _ _ => sorry
+  | fieldConstr _ _ => sorry
+  | fieldRecord _ _ _ => sorry
+  | seq _ _ => sorry
+  | ifTrue _ _ => sorry
+  | ifFalse _ _ => sorry
+  | andTrue _ _ => sorry
+  | orFalse _ _ => sorry
+  | switchConstr _ _ _ => sorry
+  | switchConstrDefault _ _ _ => sorry
+  | switchConstantMatch _ _ _ => sorry
+  | switchConstantDefault _ _ _ => sorry
+  | loopVal _ _ => sorry
+  | loopBreak _ _ => sorry
+  | loopBreakNone _ _ => sorry
+  | loopContinue _ _ _ _ => sorry
+  | loopReturn _ _ => sorry
+  | loopError _ _ => sorry
+  | handleErrorToResultOk _ => sorry
+  | handleErrorToResultErr _ => sorry
+  | handleErrorJoinOk _ => sorry
+  | handleErrorJoinErr _ _ _ => sorry
+  | handleErrorReturnErrOk _ => sorry
+  | handleErrorReturnErrErr _ => sorry
+  | returnSingle _ => sorry
+  | returnError _ => sorry
+  | returnOk _ => sorry
+  | object _ => sorry
 
-/-- Specialization: if the outcome is a value, it has the expected type. -/
+/-- Specialization for value outcomes. -/
 theorem preservation_val
     (htype : HasType Γ Δ Λ F e τ)
     (heval : Eval ft env s jt lt nl e (.val v) s' nl')

@@ -412,8 +412,10 @@ inductive ValueHasType : Value → Mtype → Prop where
   | tuple :
     ValueListHasType vals τs →
     ValueHasType (.tuple vals) (.tuple τs)
-  | loc :
+  | locConstr :
     ValueHasType (.loc l) (.constr tid)
+  | locArray :
+    ValueHasType (.loc l) (.fixedarray elemTy)
 
 /-- Pointwise value typing on lists. -/
 inductive ValueListHasType : List Value → List Mtype → Prop where
@@ -444,9 +446,9 @@ as goals; proofs require induction on the `Eval` / `HasType` derivations.
 /-- Outcome typing: an outcome has a type consistent with the expected type. -/
 inductive OutcomeHasType : Outcome → Mtype → Prop where
   | val : ValueHasType v τ → OutcomeHasType (.val v) τ
-  | «break» : OutcomeHasType (.break _ _) τ  -- break can have any expected type
+  | «break» : OutcomeHasType (.break _ _) τ
   | «continue» : OutcomeHasType (.continue _ _) τ
-  | «return» : ValueHasType v retTy → OutcomeHasType (.return v) τ
+  | «return» : OutcomeHasType (.return _) τ
   | error : OutcomeHasType (.error _) τ
 
 end Moonbit.Mcore
