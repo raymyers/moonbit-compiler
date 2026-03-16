@@ -89,7 +89,7 @@ inductive Eval (fnTable : FnTable) :
 
   /-- Constants evaluate to themselves. -/
   | const :
-    Eval fnTable env s jt nl (.const c) (evalConst c) s nl
+    Eval fnTable env s jt nl (.const c) (.const c) s nl
 
   /-- Variables look up in the environment. -/
   | var :
