@@ -112,9 +112,25 @@ def Outcome.isVal : Outcome → Prop
   | .val _ => True
   | _ => False
 
+/-- An outcome is an abort (non-value: break/continue/return/error). -/
+def Outcome.isAbort : Outcome → Prop
+  | .val _ => False
+  | _ => True
+
 def Value.isClosure : Value → Prop
   | .closure .. => True
   | _ => False
+
+/-- Constant equality (decidable, for switch matching). -/
+def Const.beq : Moonbit.Clam.Const → Moonbit.Clam.Const → Bool
+  | .bool a, .bool b => a == b
+  | .int a, .int b => a == b
+  | .int64 a, .int64 b => a == b
+  | .string a, .string b => a == b
+  | .char a, .char b => a == b
+  | .byte a, .byte b => a == b
+  | .unit, .unit => true
+  | _, _ => false
 
 /-! ## Configuration -/
 
