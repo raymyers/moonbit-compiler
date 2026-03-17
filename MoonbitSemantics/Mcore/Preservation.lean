@@ -228,14 +228,15 @@ def preservationArgs
     (htypes : HasTypeArgs Γ Δ Λ F es τs)
     (hevals : EvalArgs ft env s jt lt nl es vs s' nl')
     (henv : EnvWellTyped env Γ)
-    (hft : FnTableWellTyped ft F) :
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F) :
     ValueListHasType vs τs :=
   match htypes, hevals with
   | .nil, .nil => .nil
   | .cons htype htypes', .cons heval hrest =>
-    let oht := preservation htype heval henv hft
+    let oht := preservation htype heval henv hft hcinv
     let hvt := oht.getVal
-    .cons hvt (preservationArgs htypes' hrest henv hft)
+    .cons hvt (preservationArgs htypes' hrest henv hft hcinv)
 
 /-- **Type Preservation**: well-typed expressions evaluate to well-typed outcomes.
 
@@ -244,7 +245,8 @@ def preservation
     (htype : HasType Γ Δ Λ F e τ)
     (heval : Eval ft env s jt lt nl e outcome s' nl')
     (henv : EnvWellTyped env Γ)
-    (hft : FnTableWellTyped ft F) :
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F) :
     OutcomeHasType outcome τ :=
   match heval with
   -- ════════ Leaf cases ════════
@@ -261,38 +263,38 @@ def preservation
 
   -- ════════ All abort propagation (use IH + weaken) ════════
   | .letAbort heval_rhs hab => match htype with
-    | .let htype_rhs _ => (preservation htype_rhs heval_rhs henv hft).weaken hab
+    | .let htype_rhs _ => (preservation htype_rhs heval_rhs henv hft hcinv).weaken hab
   | .assignAbort heval_e hab => match htype with
-    | .assign _ htype_e => (preservation htype_e heval_e henv hft).weaken hab
+    | .assign _ htype_e => (preservation htype_e heval_e henv hft hcinv).weaken hab
   | .mutateAbortRec heval_rec hab => match htype with
-    | .mutate htype_rec _ => (preservation htype_rec heval_rec henv hft).weaken hab
+    | .mutate htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv).weaken hab
   | .mutateAbortFld heval_rec heval_fld hab => match htype with
-    | .mutate _ htype_fld => (preservation htype_fld heval_fld henv hft).weaken hab
+    | .mutate _ htype_fld => (preservation htype_fld heval_fld henv hft hcinv).weaken hab
   | .fieldAbort heval_rec hab => match htype with
-    | .fieldTuple htype_rec _ => (preservation htype_rec heval_rec henv hft).weaken hab
-    | .fieldHeap htype_rec => (preservation htype_rec heval_rec henv hft).weaken hab
+    | .fieldTuple htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv).weaken hab
+    | .fieldHeap htype_rec => (preservation htype_rec heval_rec henv hft hcinv).weaken hab
   | .ifAbort heval_cond hab => match htype with
-    | .ifSome htype_cond _ _ => (preservation htype_cond heval_cond henv hft).weaken hab
-    | .ifNone htype_cond _ => (preservation htype_cond heval_cond henv hft).weaken hab
+    | .ifSome htype_cond _ _ => (preservation htype_cond heval_cond henv hft hcinv).weaken hab
+    | .ifNone htype_cond _ => (preservation htype_cond heval_cond henv hft hcinv).weaken hab
   | .switchConstrAbort heval_obj hab => match htype with
-    | .switchConstrCase htype_obj _ _ => (preservation htype_obj heval_obj henv hft).weaken hab
-    | .switchConstrDefault htype_obj _ => (preservation htype_obj heval_obj henv hft).weaken hab
+    | .switchConstrCase htype_obj _ _ => (preservation htype_obj heval_obj henv hft hcinv).weaken hab
+    | .switchConstrDefault htype_obj _ => (preservation htype_obj heval_obj henv hft hcinv).weaken hab
   | .switchConstantAbort heval_obj hab => match htype with
-    | .switchConstant htype_obj _ _ => (preservation htype_obj heval_obj henv hft).weaken hab
+    | .switchConstant htype_obj _ _ => (preservation htype_obj heval_obj henv hft hcinv).weaken hab
   | .returnAbort heval_e hab => match htype with
-    | .returnSingle htype_e => (preservation htype_e heval_e henv hft).weaken hab
-    | .returnOk htype_e => (preservation htype_e heval_e henv hft).weaken hab
-    | .returnErr htype_e => (preservation htype_e heval_e henv hft).weaken hab
+    | .returnSingle htype_e => (preservation htype_e heval_e henv hft hcinv).weaken hab
+    | .returnOk htype_e => (preservation htype_e heval_e henv hft hcinv).weaken hab
+    | .returnErr htype_e => (preservation htype_e heval_e henv hft hcinv).weaken hab
   | .breakAbort heval_arg hab => match htype with
-    | .break _ htype_arg => (preservation htype_arg heval_arg henv hft).weaken hab
+    | .break _ htype_arg => (preservation htype_arg heval_arg henv hft hcinv).weaken hab
   | .objectAbort heval_self hab => match htype with
-    | .object htype_self => (preservation htype_self heval_self henv hft).weaken hab
+    | .object htype_self => (preservation htype_self heval_self henv hft hcinv).weaken hab
   | .andAbort heval_lhs hab => match htype with
-    | .and htype_lhs _ => (preservation htype_lhs heval_lhs henv hft).weaken hab
+    | .and htype_lhs _ => (preservation htype_lhs heval_lhs henv hft hcinv).weaken hab
   | .orAbort heval_lhs hab => match htype with
-    | .or htype_lhs _ => (preservation htype_lhs heval_lhs henv hft).weaken hab
+    | .or htype_lhs _ => (preservation htype_lhs heval_lhs henv hft hcinv).weaken hab
   | .recordUpdateAbortRec heval_rec hab => match htype with
-    | .recordUpdate htype_rec _ => (preservation htype_rec heval_rec henv hft).weaken hab
+    | .recordUpdate htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv).weaken hab
   -- EvalArgsAbort cases: use ofAbort (no sub-expression to IH on)
   | .constrAbort h => .ofAbort _ h.outcome_isAbort
   | .tupleAbort h => .ofAbort _ h.outcome_isAbort
@@ -325,88 +327,88 @@ def preservation
 
   | .let heval_rhs heval_body => match htype with
     | .let htype_rhs htype_body =>
-      let hvt := (preservation htype_rhs heval_rhs henv hft).getVal
+      let hvt := (preservation htype_rhs heval_rhs henv hft hcinv).getVal
       let henv' := EnvWellTyped.extend_preserves henv hvt
-      preservation htype_body heval_body henv' hft
+      preservation htype_body heval_body henv' hft sorry
 
   | .letfnNonrec heval_body => match htype with
     | .letfnNonrec htype_fn htype_body =>
       let henv' := EnvWellTyped.extend_preserves henv ValueHasType.closure
-      preservation htype_body heval_body henv' hft
+      preservation htype_body heval_body henv' hft sorry
 
   | .letfnRec heval_body => match htype with
     | .letfnRec _ htype_body =>
       let henv' := EnvWellTyped.extend_preserves henv ValueHasType.closure
-      preservation htype_body heval_body henv' hft
+      preservation htype_body heval_body henv' hft sorry
 
   | .letfnTailJoin heval_body => match htype with
     | .letfnTailJoin _ htype_body =>
-      preservation htype_body heval_body henv hft
+      preservation htype_body heval_body henv hft hcinv
 
   | .letfnNontailJoin heval_body => match htype with
     | .letfnNontailJoin _ htype_body =>
-      preservation htype_body heval_body henv hft
+      preservation htype_body heval_body henv hft hcinv
 
   | .letrec _ heval_body => match htype with
     | .letrec _ _ htype_body => sorry -- needs recursive env typing
 
   | .ifTrue heval_cond heval_so => match htype with
-    | .ifSome _ htype_so _ => preservation htype_so heval_so henv hft
-    | .ifNone _ htype_so => preservation htype_so heval_so henv hft
+    | .ifSome _ htype_so _ => preservation htype_so heval_so henv hft hcinv
+    | .ifNone _ htype_so => preservation htype_so heval_so henv hft hcinv
 
   | .ifFalse heval_cond heval_not => match htype with
-    | .ifSome _ _ htype_not => preservation htype_not heval_not henv hft
+    | .ifSome _ _ htype_not => preservation htype_not heval_not henv hft hcinv
 
   | .andTrue heval_lhs heval_rhs => match htype with
-    | .and _ htype_rhs => preservation htype_rhs heval_rhs henv hft
+    | .and _ htype_rhs => preservation htype_rhs heval_rhs henv hft hcinv
 
   | .orFalse heval_lhs heval_rhs => match htype with
-    | .or _ htype_rhs => preservation htype_rhs heval_rhs henv hft
+    | .or _ htype_rhs => preservation htype_rhs heval_rhs henv hft hcinv
 
   | .seq heval_exprs heval_last => match htype with
-    | .seq _ htype_last => preservation htype_last heval_last henv hft
+    | .seq _ htype_last => preservation htype_last heval_last henv hft hcinv
 
   | .fieldTuple heval_rec hfield => match htype with
     | .fieldTuple htype_rec hpos =>
-      let .val (.tuple hvts) := preservation htype_rec heval_rec henv hft
+      let .val (.tuple hvts) := preservation htype_rec heval_rec henv hft hcinv
       .val (hvts.getAt? _ hfield hpos)
     | .fieldHeap htype_rec =>
-      let .val hvt := preservation htype_rec heval_rec henv hft
+      let .val hvt := preservation htype_rec heval_rec henv hft hcinv
       absurd hvt (by intro h; exact ValueHasType.tuple_not_constr h)
   | .fieldConstr heval_rec hfield => match htype with
     | .fieldHeap _ => sorry -- need TypeDefs to constrain fieldTy
     | .fieldTuple htype_rec _ =>
-      let .val hvt := preservation htype_rec heval_rec henv hft
+      let .val hvt := preservation htype_rec heval_rec henv hft hcinv
       absurd hvt (by intro h; exact ValueHasType.constr_not_tuple h)
   | .fieldRecord heval_rec _ hfield => match htype with
     | .fieldHeap _ => sorry -- need TypeDefs/store typing
     | .fieldTuple htype_rec _ =>
-      let .val hvt := preservation htype_rec heval_rec henv hft
+      let .val hvt := preservation htype_rec heval_rec henv hft hcinv
       absurd hvt (by intro h; exact ValueHasType.loc_not_tuple h)
 
   | .object heval_self => match htype with
-    | .object htype_self => preservation htype_self heval_self henv hft
+    | .object htype_self => preservation htype_self heval_self henv hft hcinv
 
   -- ════════ Switch ════════
   -- Switch cases: need env extension for binder + branch typing extraction
   | .switchConstr heval_obj _ heval_branch => match htype with
     | .switchConstrCase htype_obj _ htype_branch =>
-      let .val hvt_obj := preservation htype_obj heval_obj henv hft
+      let .val hvt_obj := preservation htype_obj heval_obj henv hft hcinv
       -- Build env for the branch, case-splitting on binder
       sorry -- needs case split on binder to build EnvWellTyped for extended env
     | .switchConstrDefault _ _ => sorry
   | .switchConstrDefault heval_obj _ heval_dflt => match htype with
-    | .switchConstrDefault _ htype_dflt => preservation htype_dflt heval_dflt henv hft
+    | .switchConstrDefault _ htype_dflt => preservation htype_dflt heval_dflt henv hft hcinv
     | .switchConstrCase _ _ _ => sorry
   | .switchConstantMatch heval_obj _ heval_branch => match htype with
     | .switchConstant _ _ _ => sorry -- needs: extract branch typing from ∀ i
   | .switchConstantDefault _ _ heval_dflt => match htype with
-    | .switchConstant _ _ htype_dflt => preservation htype_dflt heval_dflt henv hft
+    | .switchConstant _ _ htype_dflt => preservation htype_dflt heval_dflt henv hft hcinv
 
   -- ════════ Prim ════════
   | .prim heval_args hprim => match htype with
     | .prim htype_args htype_prim =>
-      let hvts := preservationArgs htype_args heval_args henv hft
+      let hvts := preservationArgs htype_args heval_args henv hft hcinv
       .val (evalPrim_type_sound' hprim hvts htype_prim)
 
   -- ════════ Application ════════
@@ -420,24 +422,38 @@ def preservation
   -- Infrastructure is in place (ClosureInvariant + extend_closure + extend_non_closure).
   -- Full proof requires threading ClosureInvariant through ALL recursive calls,
   -- proving it's maintained at every env extension point.
-  | .applyClosure _ _ _ _ => sorry
+  | .applyClosure hclos heval_args hlen heval_body => match htype with
+    | .applyClosure hΓ htype_args =>
+      let ⟨hptys, Γcap, hcapWT, hbodyTyped⟩ := hcinv _ _ _ _ _ _ hclos hΓ
+      let hvts := preservationArgs htype_args heval_args henv hft hcinv
+      -- hvts : ValueListHasType argVals paramTys, need params.map (·.ty)
+      -- hptys : paramTys = params.map (·.ty)
+      let hvts' := hptys ▸ hvts
+      let henv_body := EnvWellTyped.bindParams_preserves hcapWT _ _ hvts' (by
+        have := hvts'.length_eq; simp [List.length_map] at this; omega)
+      preservation hbodyTyped heval_body henv_body hft sorry
+    | .applyRawFn _ _ => sorry
+    | .applyTopFn _ _ => sorry
   | .applyRawFn _ _ _ _ => sorry
-  | .applyTopFn _ _ _ _ => sorry
+  | .applyTopFn hfnlookup heval_args hlen heval_body => match htype with
+    | .applyTopFn hF htype_args => sorry -- needs ft lookup reconciliation
+    | .applyClosure _ _ => sorry
+    | .applyRawFn _ _ => sorry
   | .applyJoin _ _ _ _ => sorry
 
   -- ════════ Tuple (needs ValueListHasType from preservationArgs) ════════
   | .tuple heval_args => match htype with
     | .tuple htype_args =>
-      .val (.tuple (preservationArgs htype_args heval_args henv hft))
+      .val (.tuple (preservationArgs htype_args heval_args henv hft hcinv))
 
   -- ════════ Loop ════════
   | .loopVal heval_args heval_body => match htype with
     | .loop htype_args htype_body =>
-      let hvts := preservationArgs htype_args heval_args henv hft
+      let hvts := preservationArgs htype_args heval_args henv hft hcinv
       let henv' := EnvWellTyped.bindParams_preserves henv _ _ hvts (by have := hvts.length_eq; simp [List.length_map] at this; omega)
       -- body is typed with extended env + loop env
       -- We have htype_body but it uses LoopTyEnv.extend — preservation call needs matching
-      preservation htype_body heval_body henv' hft
+      preservation htype_body heval_body henv' hft sorry
   | .loopBreak heval_args heval_body => match htype with
     | .loop htype_args htype_body =>
       -- The break value has the loop's type τ. But OutcomeHasType.break
@@ -455,14 +471,14 @@ def preservation
   | .loopContinue _ _ _ heval_reentry => sorry -- needs re-entry typing
   | .loopReturn heval_args heval_body => match htype with
     | .loop htype_args htype_body =>
-      let hvts := preservationArgs htype_args heval_args henv hft
+      let hvts := preservationArgs htype_args heval_args henv hft hcinv
       let henv' := EnvWellTyped.bindParams_preserves henv _ _ hvts (by have := hvts.length_eq; simp [List.length_map] at this; omega)
-      preservation htype_body heval_body henv' hft
+      preservation htype_body heval_body henv' hft sorry
   | .loopError heval_args heval_body => match htype with
     | .loop htype_args htype_body =>
-      let hvts := preservationArgs htype_args heval_args henv hft
+      let hvts := preservationArgs htype_args heval_args henv hft hcinv
       let henv' := EnvWellTyped.bindParams_preserves henv _ _ hvts (by have := hvts.length_eq; simp [List.length_map] at this; omega)
-      preservation htype_body heval_body henv' hft
+      preservation htype_body heval_body henv' hft sorry
 
   -- ════════ Error handling ════════
   | .handleErrorToResultOk heval_obj => match htype with
@@ -470,10 +486,10 @@ def preservation
   | .handleErrorToResultErr heval_obj => match htype with
     | .handleErrorToResult _ => .val .constr
   | .handleErrorJoinOk heval_obj => match htype with
-    | .handleErrorJoinapply htype_obj _ => preservation htype_obj heval_obj henv hft
+    | .handleErrorJoinapply htype_obj _ => preservation htype_obj heval_obj henv hft hcinv
   | .handleErrorJoinErr heval_obj _ heval_body => sorry -- needs join env typing
   | .handleErrorReturnErrOk heval_obj => match htype with
-    | .handleErrorReturnErr htype_obj => preservation htype_obj heval_obj henv hft
+    | .handleErrorReturnErr htype_obj => preservation htype_obj heval_obj henv hft hcinv
   | .handleErrorReturnErrErr heval_obj => match htype with
     | .handleErrorReturnErr _ => .error
   | .handleErrorPropagate _ hnotval hnoterr =>
@@ -481,19 +497,20 @@ def preservation
 
   -- ════════ Return ════════
   | .returnSingle heval_e => match htype with
-    | .returnSingle htype_e => preservation htype_e heval_e henv hft
+    | .returnSingle htype_e => preservation htype_e heval_e henv hft hcinv
   | .returnError heval_e => match htype with
     | .returnErr _ => .error
   | .returnOk heval_e => match htype with
-    | .returnOk htype_e => preservation htype_e heval_e henv hft
+    | .returnOk htype_e => preservation htype_e heval_e henv hft hcinv
 
 def preservation_val
     (htype : HasType Γ Δ Λ F e τ)
     (heval : Eval ft env s jt lt nl e (.val v) s' nl')
     (henv : EnvWellTyped env Γ)
-    (hft : FnTableWellTyped ft F) :
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F) :
     ValueHasType v τ :=
-  (preservation htype heval henv hft).getVal
+  (preservation htype heval henv hft hcinv).getVal
 
 end -- mutual
 
