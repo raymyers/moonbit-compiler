@@ -15,6 +15,13 @@ open Moonbit.Clam (Const Prim ArithOp CmpOp)
 @[simp] theorem Outcome.val_not_abort (v : Value) : ¬ (Outcome.val v).isAbort := by
   simp [Outcome.isAbort]
 
+/-- Lift OutcomeHasType to a different expected type (abort outcomes are polymorphic). -/
+def OutcomeHasType.weaken : OutcomeHasType o τ₁ → o.isAbort → OutcomeHasType o τ₂
+  | .break, _ => .break
+  | .continue, _ => .continue
+  | .return, _ => .return
+  | .error, _ => .error
+
 def OutcomeHasType.ofAbort : (o : Outcome) → o.isAbort → OutcomeHasType o τ
   | .break _ _, _ => .break
   | .continue _ _, _ => .continue
@@ -252,21 +259,42 @@ def preservation
   | .rawFunction => match htype with
     | .rawFunction _ => .val .rawFn
 
-  -- ════════ All abort propagation ════════
-  | .letAbort _ hab => .ofAbort _ hab
-  | .assignAbort _ hab => .ofAbort _ hab
-  | .mutateAbortRec _ hab => .ofAbort _ hab
-  | .mutateAbortFld _ _ hab => .ofAbort _ hab
-  | .fieldAbort _ hab => .ofAbort _ hab
-  | .ifAbort _ hab => .ofAbort _ hab
-  | .switchConstrAbort _ hab => .ofAbort _ hab
-  | .switchConstantAbort _ hab => .ofAbort _ hab
-  | .returnAbort _ hab => .ofAbort _ hab
-  | .breakAbort _ hab => .ofAbort _ hab
-  | .objectAbort _ hab => .ofAbort _ hab
-  | .andAbort _ hab => .ofAbort _ hab
-  | .orAbort _ hab => .ofAbort _ hab
-  | .recordUpdateAbortRec _ hab => .ofAbort _ hab
+  -- ════════ All abort propagation (use IH + weaken) ════════
+  | .letAbort heval_rhs hab => match htype with
+    | .let htype_rhs _ => (preservation htype_rhs heval_rhs henv hft).weaken hab
+  | .assignAbort heval_e hab => match htype with
+    | .assign _ htype_e => (preservation htype_e heval_e henv hft).weaken hab
+  | .mutateAbortRec heval_rec hab => match htype with
+    | .mutate htype_rec _ => (preservation htype_rec heval_rec henv hft).weaken hab
+  | .mutateAbortFld heval_rec heval_fld hab => match htype with
+    | .mutate _ htype_fld => (preservation htype_fld heval_fld henv hft).weaken hab
+  | .fieldAbort heval_rec hab => match htype with
+    | .fieldTuple htype_rec _ => (preservation htype_rec heval_rec henv hft).weaken hab
+    | .fieldConstr htype_rec => (preservation htype_rec heval_rec henv hft).weaken hab
+    | .fieldRecord htype_rec => (preservation htype_rec heval_rec henv hft).weaken hab
+  | .ifAbort heval_cond hab => match htype with
+    | .ifSome htype_cond _ _ => (preservation htype_cond heval_cond henv hft).weaken hab
+    | .ifNone htype_cond _ => (preservation htype_cond heval_cond henv hft).weaken hab
+  | .switchConstrAbort heval_obj hab => match htype with
+    | .switchConstrCase htype_obj _ _ => (preservation htype_obj heval_obj henv hft).weaken hab
+    | .switchConstrDefault htype_obj _ => (preservation htype_obj heval_obj henv hft).weaken hab
+  | .switchConstantAbort heval_obj hab => match htype with
+    | .switchConstant htype_obj _ _ => (preservation htype_obj heval_obj henv hft).weaken hab
+  | .returnAbort heval_e hab => match htype with
+    | .returnSingle htype_e => (preservation htype_e heval_e henv hft).weaken hab
+    | .returnOk htype_e => (preservation htype_e heval_e henv hft).weaken hab
+    | .returnErr htype_e => (preservation htype_e heval_e henv hft).weaken hab
+  | .breakAbort heval_arg hab => match htype with
+    | .break _ htype_arg => (preservation htype_arg heval_arg henv hft).weaken hab
+  | .objectAbort heval_self hab => match htype with
+    | .object htype_self => (preservation htype_self heval_self henv hft).weaken hab
+  | .andAbort heval_lhs hab => match htype with
+    | .and htype_lhs _ => (preservation htype_lhs heval_lhs henv hft).weaken hab
+  | .orAbort heval_lhs hab => match htype with
+    | .or htype_lhs _ => (preservation htype_lhs heval_lhs henv hft).weaken hab
+  | .recordUpdateAbortRec heval_rec hab => match htype with
+    | .recordUpdate htype_rec _ => (preservation htype_rec heval_rec henv hft).weaken hab
+  -- EvalArgsAbort cases: use ofAbort (no sub-expression to IH on)
   | .constrAbort h => .ofAbort _ h.outcome_isAbort
   | .tupleAbort h => .ofAbort _ h.outcome_isAbort
   | .recordAbort h => .ofAbort _ h.outcome_isAbort
@@ -278,7 +306,7 @@ def preservation
   | .loopAbort h => .ofAbort _ h.outcome_isAbort
   | .continueAbort h => .ofAbort _ h.outcome_isAbort
 
-  -- ════════ Break / continue (non-val outcomes, always well-typed) ════════
+  -- ════════ Break / continue ════════
   | .breakSome _ => .break
   | .breakNone => .break
   | .continue _ => .continue
@@ -418,12 +446,18 @@ def preservation
       preservation htype_body heval_body henv' hft
   | .loopBreak heval_args heval_body => match htype with
     | .loop htype_args htype_body =>
-      let hvts := preservationArgs htype_args heval_args henv hft
-      let henv' := EnvWellTyped.bindParams_preserves henv _ _ hvts (by have := hvts.length_eq; simp [List.length_map] at this; omega)
-      let .break := preservation htype_body heval_body henv' hft
-      .val sorry -- break value has the right type
+      -- The break value has the loop's type τ. But OutcomeHasType.break
+      -- doesn't carry the value typing. We know from the typing rules that
+      -- HasType.break types the arg at the loop's type (from Λ label = τ).
+      -- The IH on the body gives OutcomeHasType (.break ...) τ = .break,
+      -- which doesn't give us ValueHasType. We need a separate argument.
+      sorry -- needs: extract break arg typing through OutcomeHasType
   | .loopBreakNone heval_args heval_body => match htype with
-    | .loop htype_args htype_body => sorry -- τ must be unit if break None
+    | .loop htype_args htype_body =>
+      -- break None means the loop returns unit. But τ might not be unit.
+      -- The typing rule for break None requires Λ label = ⟨_, .unit⟩,
+      -- and the loop typing sets Λ label = ⟨_, τ⟩, so τ = .unit.
+      sorry -- needs: τ = .unit from Λ label constraint
   | .loopContinue _ _ _ heval_reentry => sorry -- needs re-entry typing
   | .loopReturn heval_args heval_body => match htype with
     | .loop htype_args htype_body =>
