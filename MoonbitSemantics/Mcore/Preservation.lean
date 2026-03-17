@@ -374,12 +374,10 @@ def preservation
   -- Switch cases: need env extension for binder + branch typing extraction
   | .switchConstr heval_obj _ heval_branch => match htype with
     | .switchConstrCase htype_obj _ htype_branch =>
-      -- The branch is typed in env extended by `match binder`.
-      -- Build the extended env well-typedness.
       let .val hvt_obj := preservation htype_obj heval_obj henv hft
-      -- The branch env matches: both eval and typing use the same `match binder`.
-      -- For `some x`, env is extended with the constr value at type (.constr tid).
-      sorry -- needs: match binder env well-typedness + branch IH
+      -- The branch env depends on the binder: match binder with some/none.
+      -- Both eval and typing use the same match, so they agree.
+      sorry -- needs: case split on binder + extend_preserves for `some`
     | .switchConstrDefault _ _ => sorry
   | .switchConstrDefault heval_obj _ heval_dflt => match htype with
     | .switchConstrDefault _ htype_dflt => preservation htype_dflt heval_dflt henv hft
