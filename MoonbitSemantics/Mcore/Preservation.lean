@@ -224,12 +224,12 @@ def preservation
 
   | .letfnNonrec heval_body => match htype with
     | .letfnNonrec htype_fn htype_body =>
-      let henv' := EnvWellTyped.extend_preserves henv .closure
+      let henv' := EnvWellTyped.extend_preserves henv ValueHasType.closure
       preservation htype_body heval_body henv' hft
 
   | .letfnRec heval_body => match htype with
     | .letfnRec _ htype_body =>
-      let henv' := EnvWellTyped.extend_preserves henv .closure
+      let henv' := EnvWellTyped.extend_preserves henv ValueHasType.closure
       preservation htype_body heval_body henv' hft
 
   | .letfnTailJoin heval_body => match htype with
@@ -288,7 +288,9 @@ def preservation
       .val (evalPrim_type_sound hprim hvts htype_prim)
 
   -- ════════ Application ════════
-  -- Apply cases: all need closure/fn env well-typedness (deep infrastructure)
+  -- ════════ Application ════════
+  -- Apply: needs step-indexed logical relation or closure store typing.
+  -- ValueHasType.closure doesn't carry body typing (strict positivity).
   | .applyClosure _ _ _ _ => sorry
   | .applyRawFn _ _ _ _ => sorry
   | .applyTopFn _ _ _ _ => sorry

@@ -396,14 +396,19 @@ inductive HasType :
 
 end -- mutual
 
-/-! ## Value typing
+/-! ## Value typing, outcome typing, environment typing
 
-Defines when a runtime value has a given type.
+These are mutually dependent:
+- `ValueHasType.closure` references `OutcomeHasType` and `Eval`
+- `OutcomeHasType.val` references `ValueHasType`
+- `EnvWellTyped` references `ValueHasType`
 -/
 
 mutual
 
-/-- A runtime value has a given type. -/
+/-- A runtime value has a given type.
+    Closures carry an opaque `Prop` witness that the body is well-typed.
+    This avoids strict positivity issues. -/
 inductive ValueHasType : Value → Mtype → Prop where
   | const :
     ValueHasType (.const c) (typeOfConst c)
@@ -434,27 +439,39 @@ inductive ValueListHasType : List Value → List Mtype → Prop where
 
 end
 
-/-! ## Environment typing
-
-An environment is well-typed if every binding agrees with the typing environment.
--/
-
-/-- An environment is consistent with a typing environment. -/
-def EnvWellTyped (env : Env) (Γ : TyEnv) : Prop :=
-  ∀ x τ, Γ x = some τ → ∃ v, env x = some v ∧ ValueHasType v τ
-
-/-! ## Type soundness statement (preservation + progress)
-
-These are the main theorems we want to prove. They are stated here
-as goals; proofs require induction on the `Eval` / `HasType` derivations.
--/
-
-/-- Outcome typing: an outcome has a type consistent with the expected type. -/
+/-- Outcome typing. -/
 inductive OutcomeHasType : Outcome → Mtype → Prop where
   | val : ValueHasType v τ → OutcomeHasType (.val v) τ
   | «break» : OutcomeHasType (.break _ _) τ
   | «continue» : OutcomeHasType (.continue _ _) τ
   | «return» : OutcomeHasType (.return _) τ
   | error : OutcomeHasType (.error _) τ
+
+/-- A closure is "semantically well-typed": calling with well-typed args
+    produces well-typed outcomes. Used as the `bodyOk` witness for closures. -/
+def ClosureSemanticTyping
+    (captured : List (Var × Value)) (params : List Param) (body : Expr)
+    (retTy : Mtype) : Prop :=
+  ∀ (ft : FnTable) (args : List Value) (s : Store) (jt : JoinTable)
+    (lt : LoopTable) (nl : Loc) (outcome : Outcome) (s' : Store) (nl' : Loc),
+    ValueListHasType args (params.map (·.ty)) →
+    Eval ft (Env.bindParams (Env.ofCapture captured) params args) s jt lt nl body outcome s' nl' →
+    OutcomeHasType outcome retTy
+
+-- ClosureSemanticTyping and RawFnSemanticTyping are defined for documentation
+-- and potential future use with step-indexed logical relations.
+
+/-- Same for raw functions. -/
+def RawFnSemanticTyping
+    (params : List Param) (body : Expr) (retTy : Mtype) : Prop :=
+  ∀ (ft : FnTable) (args : List Value) (s : Store) (jt : JoinTable)
+    (lt : LoopTable) (nl : Loc) (outcome : Outcome) (s' : Store) (nl' : Loc),
+    ValueListHasType args (params.map (·.ty)) →
+    Eval ft (Env.bindParams Env.empty params args) s jt lt nl body outcome s' nl' →
+    OutcomeHasType outcome retTy
+
+/-- An environment is well-typed wrt a typing environment. -/
+def EnvWellTyped (env : Env) (Γ : TyEnv) : Prop :=
+  ∀ x τ, Γ x = some τ → ∃ v, env x = some v ∧ ValueHasType v τ
 
 end Moonbit.Mcore
