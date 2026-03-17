@@ -78,13 +78,31 @@ theorem ClosureInvariant.extend_closure
     ClosureInvariant
       (Env.extend env x (.closure captured params body))
       (TyEnv.extend Γ x (.func (params.map (·.ty)) retTy)) F := by
-  sorry -- requires injectivity lemmas for Value/Mtype constructors
+  intro y cap ps bd ptys rtTy henv_y hΓ_y
+  by_cases h : y = x
+  · subst h
+    simp only [Env.extend, ite_true, Option.some.injEq] at henv_y
+    simp only [TyEnv.extend, ite_true, Option.some.injEq] at hΓ_y
+    -- henv_y : .closure cap ps bd = .closure captured params body
+    -- hΓ_y : .func ptys rtTy = .func (params.map ...) retTy
+    cases henv_y; cases hΓ_y
+    exact ⟨rfl, Γcap, hcapWT, hbody⟩
+  · simp only [Env.extend, h, ite_false] at henv_y
+    simp only [TyEnv.extend, h, ite_false] at hΓ_y
+    exact hinv y cap ps bd ptys rtTy henv_y hΓ_y
 
 theorem ClosureInvariant.extend_non_closure
     (hinv : ClosureInvariant env Γ F)
     (hnotclos : ∀ cap ps bd, v ≠ .closure cap ps bd) :
     ClosureInvariant (Env.extend env x v) (TyEnv.extend Γ x τ) F := by
-  sorry -- straightforward: if y=x the value isn't a closure; if y≠x delegate
+  intro y cap ps bd ptys rtTy henv_y hΓ_y
+  by_cases h : y = x
+  · subst h
+    simp only [Env.extend, ite_true, Option.some.injEq] at henv_y
+    exact absurd henv_y (hnotclos cap ps bd)
+  · simp only [Env.extend, h, ite_false] at henv_y
+    simp only [TyEnv.extend, h, ite_false] at hΓ_y
+    exact hinv y cap ps bd ptys rtTy henv_y hΓ_y
 
 /-! ## ValueListHasType indexing -/
 
