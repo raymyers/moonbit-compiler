@@ -177,14 +177,16 @@ The three functions recurse on strictly smaller sub-derivations:
 
 /-! ## evalPrim type soundness -/
 
-/-- evalPrim preserves types: each prim case returns the declared type.
-    Proof requires exhaustive case analysis on (op, argTys, args). -/
+/-- evalPrim preserves types. -/
 theorem evalPrim_type_sound
     (heval : evalPrim op args = some v)
     (hargs : ValueListHasType args argTys)
     (hprim : typeOfPrim op argTys = some τ) :
     ValueHasType v τ := by
-  sorry -- ~30 mechanical cases, each trivially .const/.unit/identity
+  -- The proof proceeds by case analysis on hargs to determine concrete arg types,
+  -- then matches against evalPrim and typeOfPrim definitions.
+  -- Each case produces .const, .unit, or identity.
+  sorry
 
 set_option maxHeartbeats 1600000 in
 set_option maxRecDepth 1024 in
@@ -313,9 +315,11 @@ def preservation
   | .seq heval_exprs heval_last => match htype with
     | .seq _ htype_last => preservation htype_last heval_last henv hft
 
-  | .fieldTuple heval_rec hfield => sorry -- needs accessor pattern + ValueListHasType.get
-  | .fieldConstr heval_rec _ => sorry
-  | .fieldRecord heval_rec _ _ => sorry
+  -- Field access: IH gives value type, getAt connects to field type.
+  -- Remaining difficulty: List.getElem? ↔ List.getElem conversion.
+  | .fieldTuple _ _ => sorry
+  | .fieldConstr _ _ => sorry
+  | .fieldRecord _ _ _ => sorry
 
   | .object heval_self => match htype with
     | .object htype_self =>
@@ -327,11 +331,18 @@ def preservation
 
   -- ════════ Switch ════════
   -- Switch cases: need env extension for binder + branch typing extraction
-  | .switchConstr _ _ _ => sorry
+  | .switchConstr heval_obj _ heval_branch => match htype with
+    | .switchConstrCase _ _ htype_branch =>
+      -- Both eval and typing use `match binder` for env extension.
+      -- The branch typing htype_branch is in the extended env.
+      -- We need henv for the extended env.
+      sorry -- needs: binder env extension preserves EnvWellTyped
+    | .switchConstrDefault _ _ => sorry
   | .switchConstrDefault heval_obj _ heval_dflt => match htype with
     | .switchConstrDefault _ htype_dflt => preservation htype_dflt heval_dflt henv hft
-    | .switchConstrCase _ _ _ => sorry -- typing says case matches but eval says default
-  | .switchConstantMatch _ _ _ => sorry
+    | .switchConstrCase _ _ _ => sorry
+  | .switchConstantMatch heval_obj _ heval_branch => match htype with
+    | .switchConstant _ _ _ => sorry -- needs: extract branch typing from ∀ i
   | .switchConstantDefault _ _ heval_dflt => match htype with
     | .switchConstant _ _ htype_dflt => preservation htype_dflt heval_dflt henv hft
 
