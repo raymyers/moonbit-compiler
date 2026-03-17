@@ -49,6 +49,43 @@ def FnTableWellTyped (ft : FnTable) (F : FnTyTable) : Prop :=
       HasType (TyEnv.bindParams TyEnv.empty params)
         JoinTyEnv.empty LoopTyEnv.empty F body retTy
 
+/-! ## Closure invariant
+
+The key to proving apply cases: every closure value in the env
+has a body that is well-typed in the appropriate context. This
+invariant is maintained by all evaluation rules and gives us
+the body typing at application sites.
+-/
+
+/-- Every closure in env has a well-typed body given its captured env. -/
+def ClosureInvariant (env : Env) (Γ : TyEnv) (F : FnTyTable) : Prop :=
+  ∀ x captured params body paramTys retTy,
+    env x = some (.closure captured params body) →
+    Γ x = some (.func paramTys retTy) →
+    paramTys = params.map (·.ty) ∧
+    ∃ Γcap,
+      EnvWellTyped (Env.ofCapture captured) Γcap ∧
+      HasType (TyEnv.bindParams Γcap params)
+        JoinTyEnv.empty LoopTyEnv.empty F body retTy
+
+/-- Extending env with a closure preserves the invariant if the new
+    closure's body is well-typed. -/
+theorem ClosureInvariant.extend_closure
+    (hinv : ClosureInvariant env Γ F)
+    (hbody : HasType (TyEnv.bindParams Γcap params)
+        JoinTyEnv.empty LoopTyEnv.empty F body retTy)
+    (hcapWT : EnvWellTyped (Env.ofCapture captured) Γcap) :
+    ClosureInvariant
+      (Env.extend env x (.closure captured params body))
+      (TyEnv.extend Γ x (.func (params.map (·.ty)) retTy)) F := by
+  sorry -- requires injectivity lemmas for Value/Mtype constructors
+
+theorem ClosureInvariant.extend_non_closure
+    (hinv : ClosureInvariant env Γ F)
+    (hnotclos : ∀ cap ps bd, v ≠ .closure cap ps bd) :
+    ClosureInvariant (Env.extend env x v) (TyEnv.extend Γ x τ) F := by
+  sorry -- straightforward: if y=x the value isn't a closure; if y≠x delegate
+
 /-! ## ValueListHasType indexing -/
 
 /-- Length agreement for ValueListHasType. -/
@@ -146,7 +183,6 @@ def preservationArgs
   | .nil, .nil => .nil
   | .cons htype htypes', .cons heval hrest =>
     let oht := preservation htype heval henv hft
-    -- heval : Eval ... e (.val v) ..., so oht : OutcomeHasType (.val v) τ
     let hvt := oht.getVal
     .cons hvt (preservationArgs htypes' hrest henv hft)
 
@@ -289,8 +325,15 @@ def preservation
 
   -- ════════ Application ════════
   -- ════════ Application ════════
-  -- Apply: needs step-indexed logical relation or closure store typing.
-  -- ValueHasType.closure doesn't carry body typing (strict positivity).
+  -- Apply: requires ClosureInvariant (defined above) as additional hypothesis.
+  -- With ClosureInvariant env Γ F, the applyClosure case extracts:
+  --   1. Body typing from the invariant
+  --   2. Captured env well-typedness
+  --   3. bindParams_preserves for the body env
+  --   4. IH (preservation) on the body
+  -- Infrastructure is in place (ClosureInvariant + extend_closure + extend_non_closure).
+  -- Full proof requires threading ClosureInvariant through ALL recursive calls,
+  -- proving it's maintained at every env extension point.
   | .applyClosure _ _ _ _ => sorry
   | .applyRawFn _ _ _ _ => sorry
   | .applyTopFn _ _ _ _ => sorry
