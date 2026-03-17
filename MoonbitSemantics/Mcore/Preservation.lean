@@ -208,8 +208,7 @@ The three functions recurse on strictly smaller sub-derivations:
 - `preservationAbort` is non-recursive (abort outcomes are trivially typed).
 -/
 
-/-! ## evalPrim type soundness -/
-
+set_option maxHeartbeats 800000 in
 /-- evalPrim preserves types. -/
 theorem evalPrim_type_sound
     (heval : evalPrim op args = some v)
@@ -221,11 +220,14 @@ theorem evalPrim_type_sound
   | nil => simp [typeOfPrim] at hprim
   | cons h1 rest =>
     cases rest with
-    | nil => sorry -- 1 arg: not, neg, ignore, identity — mechanical
+    | nil =>
+      -- For non-const values: evalPrim only matches ignore/identity
+      -- For const values: need to case split on the constant
+      sorry -- 1 arg: needs nested case split const/non-const × op
     | cons h2 rest2 =>
       cases rest2 with
-      | cons _ _ => simp [typeOfPrim] at hprim -- 3+ args: impossible
-      | nil => sorry -- 2 args: mechanical case split on (h1, h2, op)
+      | cons _ _ => simp [typeOfPrim] at hprim
+      | nil => sorry -- 2 args: ~64 subcases (h1 × h2), each trivially .const
 
 set_option maxHeartbeats 1600000 in
 set_option maxRecDepth 1024 in
