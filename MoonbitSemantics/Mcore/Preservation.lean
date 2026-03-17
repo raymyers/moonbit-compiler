@@ -4,6 +4,7 @@
   via mutual structural recursion on the evaluation derivation.
 -/
 import MoonbitSemantics.Mcore.Typing
+import MoonbitSemantics.Mcore.PrimTyping
 
 namespace Moonbit.Mcore
 
@@ -208,14 +209,8 @@ The three functions recurse on strictly smaller sub-derivations:
 - `preservationAbort` is non-recursive (abort outcomes are trivially typed).
 -/
 
-/-- evalPrim preserves types. Proof requires exhaustive case analysis
-    on (ValueHasType × op × Const). Each case is trivial (.const/.unit). -/
-theorem evalPrim_type_sound
-    (heval : evalPrim op args = some v)
-    (hargs : ValueListHasType args argTys)
-    (hprim : typeOfPrim op argTys = some τ) :
-    ValueHasType v τ := by
-  sorry -- ~100 mechanical cases, each .const or .unit
+-- evalPrim_type_sound: use evalPrim_type_sound' from PrimTyping.lean
+-- (non-const 1-arg fully proven; const 1-arg and 2-arg sorry)
 
 set_option maxHeartbeats 1600000 in
 set_option maxRecDepth 1024 in
@@ -391,7 +386,7 @@ def preservation
   | .prim heval_args hprim => match htype with
     | .prim htype_args htype_prim =>
       let hvts := preservationArgs htype_args heval_args henv hft
-      .val (evalPrim_type_sound hprim hvts htype_prim)
+      .val (evalPrim_type_sound' hprim hvts htype_prim)
 
   -- ════════ Application ════════
   -- ════════ Application ════════
