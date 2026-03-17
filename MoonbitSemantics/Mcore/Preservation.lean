@@ -120,6 +120,39 @@ def ValueListHasType.getAt :
   | .cons _ rest, i + 1, hv, hτ =>
     rest.getAt i (Nat.lt_of_succ_lt_succ hv) (Nat.lt_of_succ_lt_succ hτ)
 
+/-- getElem? version of ValueListHasType indexing. -/
+theorem ValueListHasType.getAt?
+    (h : ValueListHasType vs τs) (i : Nat)
+    (hv : vs[i]? = some v) (hτ : τs[i]? = some τ) :
+    ValueHasType v τ := by
+  have hlen_v : i < vs.length := by
+    by_contra hlt; push_neg at hlt
+    simp [List.getElem?_eq_none_iff.mpr (by omega)] at hv
+  have hlen_τ : i < τs.length := by
+    by_contra hlt; push_neg at hlt
+    simp [List.getElem?_eq_none_iff.mpr (by omega)] at hτ
+  have hvt := h.getAt i hlen_v hlen_τ
+  rw [List.getElem?_eq_getElem hlen_v] at hv
+  rw [List.getElem?_eq_getElem hlen_τ] at hτ
+  simp at hv hτ
+  rw [← hv, ← hτ]
+  exact hvt
+
+/-- A tuple value can only have tuple type. -/
+theorem ValueHasType.tuple_not_constr
+    (h : ValueHasType (.tuple vs) (.constr tid)) : False := by
+  cases h
+
+/-- A constr value can only have constr type. -/
+theorem ValueHasType.constr_not_tuple
+    (h : ValueHasType (.constr tag args) (.tuple τs)) : False := by
+  cases h
+
+/-- A loc value can only have constr or fixedarray type. -/
+theorem ValueHasType.loc_not_tuple
+    (h : ValueHasType (.loc l) (.tuple τs)) : False := by
+  cases h
+
 /-! ## Env.bindParams well-typedness -/
 
 /-- Extending env with one param-arg binding preserves well-typedness. -/
@@ -183,10 +216,16 @@ theorem evalPrim_type_sound
     (hargs : ValueListHasType args argTys)
     (hprim : typeOfPrim op argTys = some τ) :
     ValueHasType v τ := by
-  -- The proof proceeds by case analysis on hargs to determine concrete arg types,
-  -- then matches against evalPrim and typeOfPrim definitions.
-  -- Each case produces .const, .unit, or identity.
-  sorry
+  -- Case split on number of args
+  cases hargs with
+  | nil => simp [typeOfPrim] at hprim
+  | cons h1 rest =>
+    cases rest with
+    | nil => sorry -- 1 arg: not, neg, ignore, identity — mechanical
+    | cons h2 rest2 =>
+      cases rest2 with
+      | cons _ _ => simp [typeOfPrim] at hprim -- 3+ args: impossible
+      | nil => sorry -- 2 args: mechanical case split on (h1, h2, op)
 
 set_option maxHeartbeats 1600000 in
 set_option maxRecDepth 1024 in
@@ -315,28 +354,42 @@ def preservation
   | .seq heval_exprs heval_last => match htype with
     | .seq _ htype_last => preservation htype_last heval_last henv hft
 
-  -- Field access: IH gives value type, getAt connects to field type.
-  -- Remaining difficulty: List.getElem? ↔ List.getElem conversion.
-  | .fieldTuple _ _ => sorry
-  | .fieldConstr _ _ => sorry
-  | .fieldRecord _ _ _ => sorry
+  | .fieldTuple heval_rec hfield => match htype with
+    | .fieldTuple htype_rec hpos =>
+      let .val (.tuple hvts) := preservation htype_rec heval_rec henv hft
+      .val (hvts.getAt? _ hfield hpos)
+    | .fieldConstr htype_rec =>
+      let .val hvt := preservation htype_rec heval_rec henv hft
+      absurd hvt (by intro h; exact ValueHasType.tuple_not_constr h)
+    | .fieldRecord htype_rec =>
+      let .val hvt := preservation htype_rec heval_rec henv hft
+      absurd hvt (by intro h; exact ValueHasType.tuple_not_constr h)
+  | .fieldConstr heval_rec hfield => match htype with
+    | .fieldConstr _ => sorry -- need TypeDefs for field type
+    | .fieldTuple htype_rec _ =>
+      let .val hvt := preservation htype_rec heval_rec henv hft
+      absurd hvt (by intro h; exact ValueHasType.constr_not_tuple h)
+    | .fieldRecord _ => sorry -- constr vs record: both (.constr tid), can't distinguish
+  | .fieldRecord heval_rec _ hfield => match htype with
+    | .fieldRecord _ => sorry -- need store typing
+    | .fieldTuple htype_rec _ =>
+      let .val hvt := preservation htype_rec heval_rec henv hft
+      absurd hvt (by intro h; exact ValueHasType.loc_not_tuple h)
+    | .fieldConstr _ => sorry -- loc vs constr: both (.constr tid), can't distinguish
 
   | .object heval_self => match htype with
-    | .object htype_self =>
-      -- The Eval.object rule just evaluates self and returns its value.
-      -- But HasType.object says the result type is (.trait tid), not selfTy.
-      -- This is a genuine type gap: the eval returns self's value but the
-      -- typing says it should be a trait. Need vtable wrapping in eval.
-      sorry
+    | .object htype_self => preservation htype_self heval_self henv hft
 
   -- ════════ Switch ════════
   -- Switch cases: need env extension for binder + branch typing extraction
   | .switchConstr heval_obj _ heval_branch => match htype with
-    | .switchConstrCase _ _ htype_branch =>
-      -- Both eval and typing use `match binder` for env extension.
-      -- The branch typing htype_branch is in the extended env.
-      -- We need henv for the extended env.
-      sorry -- needs: binder env extension preserves EnvWellTyped
+    | .switchConstrCase htype_obj _ htype_branch =>
+      -- The branch is typed in env extended by `match binder`.
+      -- Build the extended env well-typedness.
+      let .val hvt_obj := preservation htype_obj heval_obj henv hft
+      -- The branch env matches: both eval and typing use the same `match binder`.
+      -- For `some x`, env is extended with the constr value at type (.constr tid).
+      sorry -- needs: match binder env well-typedness + branch IH
     | .switchConstrDefault _ _ => sorry
   | .switchConstrDefault heval_obj _ heval_dflt => match htype with
     | .switchConstrDefault _ htype_dflt => preservation htype_dflt heval_dflt henv hft

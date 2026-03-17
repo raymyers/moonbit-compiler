@@ -391,8 +391,8 @@ inductive HasType :
   -- ═══════════ Objects ═══════════
 
   | object :
-    HasType Γ Δ Λ F self selfTy →
-    HasType Γ Δ Λ F (.object self) (.trait tid)
+    HasType Γ Δ Λ F self τ →
+    HasType Γ Δ Λ F (.object self) τ
 
 end -- mutual
 
