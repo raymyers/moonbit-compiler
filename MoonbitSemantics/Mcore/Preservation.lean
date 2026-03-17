@@ -161,6 +161,14 @@ theorem ValueHasType.loc_not_tuple
     (h : ValueHasType (.loc l) (.tuple τs)) : False := by
   cases h
 
+/-- A closure value can't have rawFunc type. -/
+theorem ValueHasType.closure_not_rawFunc
+    (h : ValueHasType (.closure c p b) (.rawFunc pts rt)) : False := by cases h
+
+/-- A closure value can't have func type with wrong params (for topFn). -/
+theorem ValueHasType.rawFn_not_func
+    (h : ValueHasType (.rawFn p b) (.func pts rt)) : False := by cases h
+
 /-! ## Env.bindParams well-typedness -/
 
 /-- Extending env with one param-arg binding preserves well-typedness. -/
@@ -432,12 +440,17 @@ def preservation
       let henv_body := EnvWellTyped.bindParams_preserves hcapWT _ _ hvts' (by
         have := hvts'.length_eq; simp [List.length_map] at this; omega)
       preservation hbodyTyped heval_body henv_body hft sorry
-    | .applyRawFn _ _ => sorry
+    | .applyRawFn hΓ _ =>
+      absurd (EnvWellTyped.lookup henv hΓ hclos) (fun h => ValueHasType.closure_not_rawFunc h)
+    | .applyTopFn _ _ => sorry -- needs: env func vs fnTable func
+  | .applyRawFn hfn heval_args hlen heval_body => match htype with
+    | .applyRawFn hΓ htype_args => sorry -- similar to applyClosure but for rawFn
+    | .applyClosure hΓ _ =>
+      absurd (EnvWellTyped.lookup henv hΓ hfn) (fun h => ValueHasType.rawFn_not_func h)
     | .applyTopFn _ _ => sorry
-  | .applyRawFn _ _ _ _ => sorry
   | .applyTopFn hfnlookup heval_args hlen heval_body => match htype with
     | .applyTopFn hF htype_args => sorry -- needs ft lookup reconciliation
-    | .applyClosure _ _ => sorry
+    | .applyClosure _ _ => sorry -- needs: fnTable func vs env func
     | .applyRawFn _ _ => sorry
   | .applyJoin _ _ _ _ => sorry
 
