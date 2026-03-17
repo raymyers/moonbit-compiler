@@ -337,17 +337,21 @@ def preservation
     | .let htype_rhs htype_body =>
       let hvt := (preservation htype_rhs heval_rhs henv hft hcinv).getVal
       let henv' := EnvWellTyped.extend_preserves henv hvt
-      preservation htype_body heval_body henv' hft sorry
+      -- ClosureInvariant for extended env: depends on whether v₁ is a closure
+      let hcinv' : ClosureInvariant _ _ _ := sorry -- extend_closure or extend_non_closure
+      preservation htype_body heval_body henv' hft hcinv'
 
   | .letfnNonrec heval_body => match htype with
     | .letfnNonrec htype_fn htype_body =>
       let henv' := EnvWellTyped.extend_preserves henv ValueHasType.closure
-      preservation htype_body heval_body henv' hft sorry
+      let hcinv' : ClosureInvariant _ _ _ := sorry -- extend_closure with htype_fn
+      preservation htype_body heval_body henv' hft hcinv'
 
   | .letfnRec heval_body => match htype with
     | .letfnRec _ htype_body =>
       let henv' := EnvWellTyped.extend_preserves henv ValueHasType.closure
-      preservation htype_body heval_body henv' hft sorry
+      let hcinv' : ClosureInvariant _ _ _ := sorry -- extend_closure with rec body typing
+      preservation htype_body heval_body henv' hft hcinv'
 
   | .letfnTailJoin heval_body => match htype with
     | .letfnTailJoin _ htype_body =>
