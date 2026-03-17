@@ -370,9 +370,8 @@ def preservation
   | .switchConstr heval_obj _ heval_branch => match htype with
     | .switchConstrCase htype_obj _ htype_branch =>
       let .val hvt_obj := preservation htype_obj heval_obj henv hft
-      -- The branch env depends on the binder: match binder with some/none.
-      -- Both eval and typing use the same match, so they agree.
-      sorry -- needs: case split on binder + extend_preserves for `some`
+      -- Build env for the branch, case-splitting on binder
+      sorry -- needs case split on binder to build EnvWellTyped for extended env
     | .switchConstrDefault _ _ => sorry
   | .switchConstrDefault heval_obj _ heval_dflt => match htype with
     | .switchConstrDefault _ htype_dflt => preservation htype_dflt heval_dflt henv hft
