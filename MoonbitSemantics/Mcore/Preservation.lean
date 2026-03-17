@@ -270,8 +270,7 @@ def preservation
     | .mutate _ htype_fld => (preservation htype_fld heval_fld henv hft).weaken hab
   | .fieldAbort heval_rec hab => match htype with
     | .fieldTuple htype_rec _ => (preservation htype_rec heval_rec henv hft).weaken hab
-    | .fieldConstr htype_rec => (preservation htype_rec heval_rec henv hft).weaken hab
-    | .fieldRecord htype_rec => (preservation htype_rec heval_rec henv hft).weaken hab
+    | .fieldHeap htype_rec => (preservation htype_rec heval_rec henv hft).weaken hab
   | .ifAbort heval_cond hab => match htype with
     | .ifSome htype_cond _ _ => (preservation htype_cond heval_cond henv hft).weaken hab
     | .ifNone htype_cond _ => (preservation htype_cond heval_cond henv hft).weaken hab
@@ -371,24 +370,19 @@ def preservation
     | .fieldTuple htype_rec hpos =>
       let .val (.tuple hvts) := preservation htype_rec heval_rec henv hft
       .val (hvts.getAt? _ hfield hpos)
-    | .fieldConstr htype_rec =>
-      let .val hvt := preservation htype_rec heval_rec henv hft
-      absurd hvt (by intro h; exact ValueHasType.tuple_not_constr h)
-    | .fieldRecord htype_rec =>
+    | .fieldHeap htype_rec =>
       let .val hvt := preservation htype_rec heval_rec henv hft
       absurd hvt (by intro h; exact ValueHasType.tuple_not_constr h)
   | .fieldConstr heval_rec hfield => match htype with
-    | .fieldConstr _ => sorry -- need TypeDefs for field type
+    | .fieldHeap _ => sorry -- need TypeDefs to constrain fieldTy
     | .fieldTuple htype_rec _ =>
       let .val hvt := preservation htype_rec heval_rec henv hft
       absurd hvt (by intro h; exact ValueHasType.constr_not_tuple h)
-    | .fieldRecord _ => sorry -- constr vs record: both (.constr tid), can't distinguish
   | .fieldRecord heval_rec _ hfield => match htype with
-    | .fieldRecord _ => sorry -- need store typing
+    | .fieldHeap _ => sorry -- need TypeDefs/store typing
     | .fieldTuple htype_rec _ =>
       let .val hvt := preservation htype_rec heval_rec henv hft
       absurd hvt (by intro h; exact ValueHasType.loc_not_tuple h)
-    | .fieldConstr _ => sorry -- loc vs constr: both (.constr tid), can't distinguish
 
   | .object heval_self => match htype with
     | .object htype_self => preservation htype_self heval_self henv hft

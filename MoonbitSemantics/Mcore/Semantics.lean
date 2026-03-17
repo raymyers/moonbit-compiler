@@ -18,8 +18,8 @@ def evalPrim : Prim → List Value → Option Value
   | .arith .add, [.const (.int a), .const (.int b)] => some (.const (.int (a + b)))
   | .arith .sub, [.const (.int a), .const (.int b)] => some (.const (.int (a - b)))
   | .arith .mul, [.const (.int a), .const (.int b)] => some (.const (.int (a * b)))
-  | .arith .div, [.const (.int a), .const (.int b)] => if b ≠ 0 then some (.const (.int (a / b))) else none
-  | .arith .mod, [.const (.int a), .const (.int b)] => if b ≠ 0 then some (.const (.int (a % b))) else none
+  | .arith .div, [.const (.int a), .const (.int b)] => some (.const (.int (a / b)))
+  | .arith .mod, [.const (.int a), .const (.int b)] => some (.const (.int (a % b)))
   | .cmp .eq, [.const (.int a), .const (.int b)] => some (.const (.bool (a == b)))
   | .cmp .ne, [.const (.int a), .const (.int b)] => some (.const (.bool (a != b)))
   | .cmp .lt, [.const (.int a), .const (.int b)] => some (.const (.bool (a < b)))

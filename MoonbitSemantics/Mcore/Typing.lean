@@ -259,11 +259,8 @@ inductive HasType :
     τs[pos]? = some τ →
     HasType Γ Δ Λ F (.field rec_ acc pos) τ
 
-  | fieldConstr :
-    HasType Γ Δ Λ F rec_ (.constr tid) →
-    HasType Γ Δ Λ F (.field rec_ acc pos) fieldTy
-
-  | fieldRecord :
+  /-- Field access from a constr or record (both have type .constr tid). -/
+  | fieldHeap :
     HasType Γ Δ Λ F rec_ (.constr tid) →
     HasType Γ Δ Λ F (.field rec_ acc pos) fieldTy
 
