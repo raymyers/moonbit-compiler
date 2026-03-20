@@ -47,6 +47,66 @@ def findConstantCase (cases : List (Const × Expr)) (c : Const) : Option Expr :=
   | some (_, branch) => some branch
   | none => none
 
+/-- If `findConstrCase cases tag` returns `some (binder, branch)`, then the triple
+    `(tag, binder, branch)` is a member of `cases`. -/
+lemma findConstrCase_mem (cases : List (ConstrTag × Option Var × Expr)) (tag : ConstrTag)
+    (binder : Option Var) (branch : Expr)
+    (h : findConstrCase cases tag = some (binder, branch)) :
+    (tag, binder, branch) ∈ cases := by
+  simp only [findConstrCase] at h
+  generalize hf : cases.find? (fun (t, _, _) => t == tag) = r at h
+  cases r with
+  | none => simp at h
+  | some entry =>
+    obtain ⟨t, b, e⟩ := entry
+    simp only [Option.some.injEq, Prod.mk.injEq] at h
+    obtain ⟨⟨rfl, rfl⟩, rfl⟩ := h
+    have hmem := List.mem_of_find?_eq_some hf
+    have hpred := List.find?_some hf
+    simp only [beq_iff_eq] at hpred
+    rw [← hpred]
+    exact hmem
+
+/-- If `findConstantCase cases c` returns `some branch`, then there exists a key `c'`
+    such that `(c', branch) ∈ cases` and `Const.beq c' c = true`. -/
+lemma findConstantCase_mem (cases : List (Const × Expr)) (c : Const) (branch : Expr)
+    (h : findConstantCase cases c = some branch) :
+    ∃ c', (c', branch) ∈ cases ∧ Const.beq c' c = true := by
+  simp only [findConstantCase] at h
+  generalize hf : cases.find? (fun (k, _) => Const.beq k c) = r at h
+  cases r with
+  | none => simp at h
+  | some entry =>
+    obtain ⟨k, e⟩ := entry
+    simp only [Option.some.injEq] at h
+    rw [← h]
+    have hmem := List.mem_of_find?_eq_some hf
+    have hpred := List.find?_some hf
+    simp only at hpred
+    exact ⟨k, hmem, hpred⟩
+
+/-- If `findConstantCase cases c` returns `some branch`, then there exists an index `i`
+    (with a bound proof `hi : i < cases.length`) such that `(cases[i]).2 = branch`. -/
+lemma findConstantCase_index (cases : List (Const × Expr)) (c : Const) (branch : Expr)
+    (h : findConstantCase cases c = some branch) :
+    ∃ i, ∃ hi : i < cases.length, (cases[i]'hi).2 = branch := by
+  simp only [findConstantCase] at h
+  generalize hf : cases.find? (fun (k, _) => Const.beq k c) = r at h
+  cases r with
+  | none => simp at h
+  | some entry =>
+    obtain ⟨k, e⟩ := entry
+    simp only [Option.some.injEq] at h
+    rw [← h]
+    have hmem := List.mem_of_find?_eq_some hf
+    rw [List.mem_iff_get] at hmem
+    obtain ⟨idx, hidx⟩ := hmem
+    refine ⟨idx.val, idx.isLt, ?_⟩
+    have : cases[idx.val]'idx.isLt = (k, e) := by
+      rw [← List.get_eq_getElem]
+      exact hidx
+    rw [this]
+
 /-! ## Big-step evaluation
 
 Every compound expression form has:
@@ -130,7 +190,7 @@ inductive Eval (fnTable : FnTable) :
 
   | «function» :
     Eval fnTable env s jt lt nl (.function params fnBody false)
-      (.val (.closure (Env.capture env freeVars) params fnBody)) s nl
+      (.val (.closure env params fnBody)) s nl
 
   | rawFunction :
     Eval fnTable env s jt lt nl (.function params fnBody true)
@@ -141,13 +201,13 @@ inductive Eval (fnTable : FnTable) :
   -- ══════════════════════════════════════════════════════════════════
 
   | letfnNonrec :
-    Eval fnTable (Env.extend env name (.closure (Env.capture env freeVars) params fnBody))
+    Eval fnTable (Env.extend env name (.closure env params fnBody))
       s jt lt nl body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letfn name params fnBody body .nonRecursive) outcome s₁ nl₁
 
   | letfnRec :
     Eval fnTable
-      (Env.extend env name (.closure ((name, Value.unit) :: Env.capture env freeVars) params fnBody))
+      (Env.extend env name (.closure (Env.extend env name (.closure env params fnBody)) params fnBody))
       s jt lt nl body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letfn name params fnBody body .recursive) outcome s₁ nl₁
 
@@ -168,7 +228,7 @@ inductive Eval (fnTable : FnTable) :
   /-- Mutually recursive bindings. Each closure captures the full recursive env. -/
   | letrec :
     recEnv = Env.extendMany env
-      (bindings.map fun (v, ps, b) => (v, Value.closure (Env.capture recEnv freeVars) ps b)) →
+      (bindings.map fun (v, ps, b) => (v, Value.closure recEnv ps b)) →
     Eval fnTable recEnv s jt lt nl body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letrec bindings body) outcome s₁ nl₁
 
@@ -180,7 +240,7 @@ inductive Eval (fnTable : FnTable) :
     env func = some (.closure captured params fnBody) →
     EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
     params.length = argVals.length →
-    Eval fnTable (Env.bindParams (Env.ofCapture captured) params argVals)
+    Eval fnTable (Env.bindParams captured params argVals)
       s₁ JoinTable.empty LoopTable.empty nl₁ fnBody outcome sr nlr →
     Eval fnTable env s jt lt nl (.apply func argExprs (.normal funcTy)) outcome sr nlr
 

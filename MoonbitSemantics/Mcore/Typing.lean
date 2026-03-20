@@ -150,6 +150,7 @@ inductive HasType :
   -- ═══════════ Let binding ═══════════
 
   | «let» :
+    F name = none →
     HasType Γ Δ Λ F rhs τ₁ →
     HasType (TyEnv.extend Γ name τ₁) Δ Λ F body τ₂ →
     HasType Γ Δ Λ F (.let name rhs body) τ₂
@@ -157,11 +158,13 @@ inductive HasType :
   -- ═══════════ Functions ═══════════
 
   | «function» :
+    (∀ p, p ∈ params → F p.binder = none) →
     HasType (TyEnv.bindParams Γ params) JoinTyEnv.empty LoopTyEnv.empty F fnBody retTy →
     HasType Γ Δ Λ F (.function params fnBody false)
       (.func (params.map (·.ty)) retTy)
 
   | rawFunction :
+    (∀ p, p ∈ params → F p.binder = none) →
     HasType (TyEnv.bindParams Γ params) JoinTyEnv.empty LoopTyEnv.empty F fnBody retTy →
     HasType Γ Δ Λ F (.function params fnBody true)
       (.rawFunc (params.map (·.ty)) retTy)
@@ -169,11 +172,15 @@ inductive HasType :
   -- ═══════════ Local function bindings ═══════════
 
   | letfnNonrec :
+    F name = none →
+    (∀ p, p ∈ params → F p.binder = none) →
     HasType (TyEnv.bindParams Γ params) JoinTyEnv.empty LoopTyEnv.empty F fnBody retTy →
     HasType (TyEnv.extend Γ name (.func (params.map (·.ty)) retTy)) Δ Λ F body τ →
     HasType Γ Δ Λ F (.letfn name params fnBody body .nonRecursive) τ
 
   | letfnRec :
+    F name = none →
+    (∀ p, p ∈ params → F p.binder = none) →
     HasType (TyEnv.bindParams (TyEnv.extend Γ name (.func (params.map (·.ty)) retTy)) params)
       JoinTyEnv.empty LoopTyEnv.empty F fnBody retTy →
     HasType (TyEnv.extend Γ name (.func (params.map (·.ty)) retTy)) Δ Λ F body τ →
@@ -298,31 +305,27 @@ inductive HasType :
 
   -- ═══════════ Pattern matching ═══════════
 
-  /-- Switch with match: we type each branch assuming the binder (if present) has the scrutinee type. -/
-  | switchConstrCase :
+  /-- Switch on constructors: all branches (and default) must have type τ. -/
+  | switchConstr :
     HasType Γ Δ Λ F obj (.constr tid) →
-    findConstrCase cases tag = some (binder, branch) →
-    HasType (match binder with
-      | some x => TyEnv.extend Γ x (.constr tid)
-      | none => Γ) Δ Λ F branch τ →
+    (∀ tag binder branch, findConstrCase cases tag = some (binder, branch) →
+      HasType (match binder with
+        | some x => TyEnv.extend Γ x (.constr tid)
+        | none => Γ) Δ Λ F branch τ) →
+    (∀ d, dflt = some d → HasType Γ Δ Λ F d τ) →
     HasType Γ Δ Λ F (.switchConstr obj cases dflt) τ
-
-  | switchConstrDefault :
-    HasType Γ Δ Λ F obj (.constr tid) →
-    HasType Γ Δ Λ F d τ →
-    HasType Γ Δ Λ F (.switchConstr obj cases (some d)) τ
 
   | switchConstant :
     HasType Γ Δ Λ F obj objTy →
     (∀ i (h : i < cases.length),
-      let (_, branch) := cases[i]
-      HasType Γ Δ Λ F branch τ) →
+      HasType Γ Δ Λ F (cases[i]).2 τ) →
     HasType Γ Δ Λ F dflt τ →
     HasType Γ Δ Λ F (.switchConstant obj cases dflt) τ
 
   -- ═══════════ Loops ═══════════
 
   | loop :
+    (∀ p, p ∈ params → F p.binder = none) →
     HasTypeArgs Γ Δ Λ F argExprs (params.map (·.ty)) →
     HasType (TyEnv.bindParams Γ params) Δ
       (LoopTyEnv.extend Λ label ⟨params.map (·.ty), τ⟩) F body τ →
@@ -445,18 +448,15 @@ inductive OutcomeHasType : Outcome → Mtype → Prop where
   | error : OutcomeHasType (.error _) τ
 
 /-- A closure is "semantically well-typed": calling with well-typed args
-    produces well-typed outcomes. Used as the `bodyOk` witness for closures. -/
+    produces well-typed outcomes. -/
 def ClosureSemanticTyping
-    (captured : List (Var × Value)) (params : List Param) (body : Expr)
+    (captured : Env) (params : List Param) (body : Expr)
     (retTy : Mtype) : Prop :=
   ∀ (ft : FnTable) (args : List Value) (s : Store) (jt : JoinTable)
     (lt : LoopTable) (nl : Loc) (outcome : Outcome) (s' : Store) (nl' : Loc),
     ValueListHasType args (params.map (·.ty)) →
-    Eval ft (Env.bindParams (Env.ofCapture captured) params args) s jt lt nl body outcome s' nl' →
+    Eval ft (Env.bindParams captured params args) s jt lt nl body outcome s' nl' →
     OutcomeHasType outcome retTy
-
--- ClosureSemanticTyping and RawFnSemanticTyping are defined for documentation
--- and potential future use with step-indexed logical relations.
 
 /-- Same for raw functions. -/
 def RawFnSemanticTyping

@@ -42,7 +42,10 @@ private theorem ep2_const_const
     (h : evalPrim op [.const c1, .const c2] = some v)
     (hp : typeOfPrim op [typeOfConst c1, typeOfConst c2] = some τ) :
     ValueHasType v τ := by
-  sorry -- 9×9×11 = 891 subcases. simp_all closes ~889, 2 remain (cmp cases).
+  cases c1 <;> cases c2 <;> cases op <;>
+    simp_all [evalPrim, typeOfPrim, typeOfConst, arithResultType] <;> subst_vars <;>
+    first | exact .const | exact .unit |
+      (rename_i x; cases x <;> simp_all <;> subst_vars <;> exact .const)
 
 set_option maxHeartbeats 1600000 in
 theorem evalPrim_type_sound'
@@ -57,7 +60,10 @@ theorem evalPrim_type_sound'
     | cons h2 rest2 =>
       cases rest2 with
       | cons _ _ => simp [typeOfPrim] at hprim
-      | nil => sorry -- 2-arg: mechanical case explosion
+      | nil =>
+        cases h1 <;> cases h2 <;>
+          first | exact ep2_const_const heval hprim |
+            (cases op <;> simp [evalPrim] at heval)
     | nil =>
       cases h1 with
       | const =>

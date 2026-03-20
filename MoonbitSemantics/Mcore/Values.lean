@@ -12,15 +12,16 @@ abbrev Loc := Nat
 
 /-! ## Runtime values
 
-Closures capture a list of (var, value) bindings rather than an entire `Env`
-function, breaking the mutual recursion between Value and Env.
+Closures capture the full environment as a function `Var → Option Value`.
+Lean 4 accepts this because `Value` occurs in strictly positive position
+in the function type's codomain.
 -/
 
 /-- A runtime value produced by evaluating an Mcore expression. -/
 inductive Value where
   | const (c : Moonbit.Clam.Const)
   | unit
-  | closure (captured : List (Var × Value)) (params : List Param) (body : Expr)
+  | closure (captured : Var → Option Value) (params : List Param) (body : Expr)
   | rawFn (params : List Param) (body : Expr)
   | constr (tag : ConstrTag) (args : List Value)
   | tuple (vals : List Value)
@@ -59,14 +60,6 @@ def Env.extendMany (env : Env) (bindings : List (Var × Value)) : Env :=
 def Env.bindParams (env : Env) (params : List Param) (args : List Value) : Env :=
   Env.extendMany env (params.map (·.binder) |>.zip args)
 
-/-- Snapshot an environment to a list of bindings (for closure creation).
-    In the semantics we pass the relevant captured variables explicitly. -/
-def Env.capture (env : Env) (vars : List Var) : List (Var × Value) :=
-  vars.filterMap fun v => (env v).map (v, ·)
-
-/-- Restore a captured environment. -/
-def Env.ofCapture (captured : List (Var × Value)) : Env :=
-  Env.extendMany Env.empty captured
 
 /-! ## Function table -/
 
