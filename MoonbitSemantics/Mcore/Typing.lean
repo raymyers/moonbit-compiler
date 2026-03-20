@@ -165,7 +165,7 @@ inductive HasType :
 
   | rawFunction :
     (∀ p, p ∈ params → F p.binder = none) →
-    HasType (TyEnv.bindParams Γ params) JoinTyEnv.empty LoopTyEnv.empty F fnBody retTy →
+    HasType (TyEnv.bindParams TyEnv.empty params) JoinTyEnv.empty LoopTyEnv.empty F fnBody retTy →
     HasType Γ Δ Λ F (.function params fnBody true)
       (.rawFunc (params.map (·.ty)) retTy)
 

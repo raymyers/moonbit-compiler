@@ -65,7 +65,7 @@ def HasType.strengthen
   | .varPrim hΓ => .varPrim (hsub _ _ hΓ)
   | .let hF h1 h2 => .let hF (h1.strengthen hsub) (h2.strengthen (fun x τ' h => TyEnv.extend_mono hsub h))
   | .function hp hb => .function hp (hb.strengthen (TyEnv.bindParams_mono hsub _))
-  | .rawFunction hp hb => .rawFunction hp (hb.strengthen (TyEnv.bindParams_mono hsub _))
+  | .rawFunction hp hb => .rawFunction hp hb
   | .letfnNonrec hF hp hfn hbd =>
     .letfnNonrec hF hp (hfn.strengthen (TyEnv.bindParams_mono hsub _))
       (hbd.strengthen (fun x τ' h => TyEnv.extend_mono hsub h))
