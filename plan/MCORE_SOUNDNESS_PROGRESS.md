@@ -22,8 +22,8 @@ not soundness bugs.
 All 10 `EvalArgsAbort` cases via `ofAbort`. Abort outcomes correctly preserve
 break value typing through the IH chain.
 
-**Bindings (6):** let, letfnNonrec, letfnRec, letfnTailJoin, letfnNontailJoin, letrec
-(all modulo ClosureInvariant maintenance sorry)
+**Bindings (6):** let, letfnNonrec, letfnTailJoin, letfnNontailJoin (fully proven);
+letfnRec, letrec (sorry — see Barrier 7)
 
 **Control flow (10):** ifTrue, ifFalse, ifFalseNoElse, andTrue, andFalse, orTrue,
 orFalse, seq, breakSome, breakNone, continue
@@ -70,21 +70,22 @@ handleErrorReturnErrOk/Err, handleErrorPropagate
 - `evalPrim_type_sound'`: evalPrim preserves types (fully proven)
 - `evalPrim_non_identity_constOrUnit`: non-identity evalPrim returns const or unit
 
-## Remaining sorry: 11 total (9 Preservation + 2 FreeVars)
+## Remaining sorry: 9 total (7 Preservation + 2 FreeVars)
 
 Note: FreeVars.lean sorry are termination proofs (`decreasing_by all_goals sorry`)
 — a Lean 4 limitation on ∀-quantified sub-derivations in structural recursion.
 
 Progress from original 28 sorry:
-- **17 sorry closed** (28 → 11):
+- **19 sorry closed** (28 → 9):
   - let, letfnNonrec, applyClosure body, loopVal, loopReturn, loopError,
     applyTopFn body, var/varPrim ValClosureOk, applyClosure×applyTopFn,
     applyRawFn×applyTopFn, applyTopFn×applyClosure, applyTopFn×applyRawFn,
     fieldTuple ValClosureOk (P3), evalPrim ValClosureOk (P6),
-    applyRawFn body (P7), PrimTyping ep2_const_const, PrimTyping 2-arg branch
+    applyRawFn body (P7), PrimTyping ep2_const_const, PrimTyping 2-arg branch,
+    letfnTailJoin, letfnNontailJoin
 - PrimTyping.lean: 2/2 closed
 - FreeVars.lean: 3/5 closed
-- Preservation.lean: 12/21 closed
+- Preservation.lean: 14/21 closed
 
 ### Architecture changes made
 
@@ -109,6 +110,8 @@ ValClosureOk v τ F`, with a single `extend` lemma taking `ValClosureOk`.
 - **var/varPrim** ValClosureOk: extract from ClosureInvariant via hcinv lookup
 - **HasType.strengthen**: env monotonicity lemma (bigger Γ → still well-typed)
 - **TyEnv.extend_mono, extendMany_mono, bindParams_mono**: subset propagation
+- **letfnTailJoin, letfnNontailJoin**: join table passes through, no join typing needed at binding site
+- **loopBreak, loopBreakNone**: extract break value typing from LoopTyEnv.extend via simp
 
 ### ~~Barrier 1: fieldTuple ValClosureOk~~ — CLOSED (P3)
 
@@ -134,9 +137,10 @@ eval and typing pick different paths.
 
 **Estimated effort:** ~60 lines (typing rule restructure).
 
-### Barrier 4: Loop break value typing (3 sorry)
+### ~~Barrier 4: Loop break value typing~~ — PARTIALLY CLOSED (2 of 3)
 
-**Where:** loopBreak (1), loopBreakNone (1), loopContinue (1)
+**Closed:** loopBreak, loopBreakNone
+**Remaining:** loopContinue (1) — see also Barrier 7
 
 **What's needed:** Same as before — `OutcomeHasType.break` doesn't carry the
 break value's type. Strengthen to `BreakValueTyped` invariant.
@@ -168,7 +172,20 @@ case splits (~80K goals that OOMed).
 - **letrec (1):** Recursive env fixpoint — needs ClosureInvariant for the
   mutually-recursive binding group.
 
-- **handleErrorJoinErr (1) + applyJoin (1):** Need `JoinWellTyped` hypothesis.
+- **applyJoin (1):** Needs `JoinWellTyped` invariant connecting runtime join
+  table (`jt`) with typing join env (`Δ`). Requires: (a) `HasType.strengthen_Δ`
+  (Δ-monotonicity) mutual lemma in FreeVars.lean, (b) `JoinTyEnv.extend_mono`
+  helper, (c) freshness conditions (`Δ name = none`) on `letfnTailJoin`/
+  `letfnNontailJoin` typing rules, (d) threading `JoinWellTyped` through all
+  ~50 recursive calls in preservation. Achievable but high effort (~100+ lines).
+
+- **handleErrorJoinErr (1):** Needs `JoinWellTyped` (same as applyJoin) PLUS
+  error value typing. Currently `OutcomeHasType.error` does not carry
+  `ValueHasType v errTy` for the error value, so even with `JoinWellTyped`
+  threaded through, the error value passed to the join body cannot be shown
+  well-typed. Fixing this requires strengthening `OutcomeHasType.error` to
+  carry error value typing, which propagates changes through all error-producing
+  cases. This is a deeper issue than applyJoin alone.
 
 - **loopContinue (1):** Re-entry typing — same body is evaluated again with
   new args. Needs the loop body typing to be reusable across iterations.
@@ -226,15 +243,19 @@ Use these to close `applyTopFn×applyClosure`, `applyClosure×applyTopFn`,
 `applyTopFn×applyRawFn`, `applyRawFn×applyTopFn` (4 cross-typing sorry)
 plus `applyTopFn body` (1 sorry, via `fnTable_some_inj` to unify params/body).
 
-**JoinWellTyped** — new invariant (~20 lines definition + threading):
+**JoinWellTyped** — new invariant (~20 lines definition + ~100 lines threading):
 ```lean
-def JoinWellTyped (jt : JoinTable) (Δ : JoinTyEnv) : Prop :=
-  ∀ label params body paramTys resultTy,
-    jt label = some (params, body) →
-    Δ label = some ⟨paramTys, resultTy⟩ →
-    HasType (TyEnv.bindParams TyEnv.empty params) ... body resultTy
+def JoinWellTyped (jt : JoinTable) (Δ : JoinTyEnv) (Γ : TyEnv) (Λ : LoopTyEnv) (F : FnTyTable) : Prop :=
+  ∀ func params jbody paramTys retTy,
+    jt func = some ⟨params, jbody⟩ →
+    Δ func = some ⟨paramTys, retTy⟩ →
+    params.map (·.ty) = paramTys ∧
+    (∀ p, p ∈ params → F p.binder = none) ∧
+    HasType (TyEnv.bindParams Γ params) Δ Λ F jbody retTy
 ```
-Thread through preservation. Closes `handleErrorJoinErr` and `applyJoin` (2 sorry).
+Thread through preservation. Closes `applyJoin` (1 sorry). `handleErrorJoinErr`
+also needs error value typing (see Barrier 7) so JoinWellTyped alone is insufficient.
+Estimated effort: ~100+ lines for Δ-monotonicity, freshness conditions, and threading.
 
 ### Step 3 — Loop break value typing (unlocks 3 sorry)
 
@@ -314,11 +335,11 @@ Purely mechanical — save for last.
 | ~~1~~ | ~~fieldTuple ValClosureOk~~ | ~~1~~ | ~~Per-element ValClosureOk~~ | CLOSED |
 | ~~2~~ | ~~Apply cross-typing~~ | ~~5~~ | ~~Consistency + rawFn constructor~~ | CLOSED |
 | 3 | Switch typing rules | 0* | Restructure to type all branches | *Already resolved* |
-| 4 | Loop break/continue | 3 | BreakContinueTyped + re-entry | Open |
+| ~~4~~ | ~~Loop break/continue~~ | ~~2~~ | ~~BreakValueTyped~~ | CLOSED (loopBreak, loopBreakNone) |
 | 5 | Field TypeDefs | 2 | Thread TypeDefs through HasType | Open |
 | ~~6~~ | ~~evalPrim~~ | ~~3~~ | ~~split tactic + simp_all~~ | CLOSED |
-| 7 | Other (letfnRec, letrec, join) | 4 | Per-case fixes | Open |
-| **Total** | | **9** (Preservation) | | |
+| 7 | Other (letfnRec, letrec, join, loop) | 5 | Per-case fixes | Open |
+| **Total** | | **7** (Preservation) | | |
 | FreeVars | termination | 2 | Well-founded recursion | Open |
 
 ## Files
@@ -336,9 +357,9 @@ Purely mechanical — save for last.
 | Mcore/FreeVars.lean | 135 | 2 | HasType.strengthen + TyEnv monotonicity |
 | Mcore/PrimTyping.lean | 83 | 0 | evalPrim type soundness |
 | Mcore/EvalPrimForm.lean | 16 | 0 | evalPrim non-identity returns const/unit |
-| Mcore/Preservation.lean | 868 | 9 | Type preservation (PresResult + ValClosureOk) |
+| Mcore/Preservation.lean | 916 | 7 | Type preservation (PresResult + ValClosureOk) |
 | Mcore/Simulation.lean | 180 | 0 | Mcore→Clam value/type correspondence |
 | Examples.lean | 277 | 0 | 9 end-to-end evaluation examples |
 | Clam.lean | 3 | 0 | Root import |
 | Mcore.lean | 8 | 0 | Root import |
-| **Total** | **~3550** | **11** | |
+| **Total** | **~3600** | **9** | |
