@@ -639,9 +639,13 @@ def preservation
       let hcinv' := ClosureInvariant.extend hcinv hcl
       preservation htype_body heval_body henv' hft hcinv' (hdisj.extend hFname) hftc
 
-  | .letfnRec heval_body => match htype with
+  | .letfnRec hrecEnv_eq heval_body => match htype with
     | .letfnRec hFname hparams htype_fn htype_body =>
-      sorry -- needs: recursive closure ValClosureOk (inner closure captures env without name)
+      let hcl := ValClosureOk.recClosure rfl hrecEnv_eq henv (fun x v τ h1 h2 => hcinv x v τ h1 h2)
+        hdisj hFname hparams htype_fn
+      let henv' := hrecEnv_eq ▸ EnvWellTyped.extend_preserves henv ValueHasType.closure
+      let hcinv' := hrecEnv_eq ▸ ClosureInvariant.extend hcinv hcl
+      preservation htype_body heval_body henv' hft hcinv' (hrecEnv_eq ▸ hdisj.extend hFname) hftc
 
   | .letfnTailJoin heval_body => match htype with
     | .letfnTailJoin _ htype_body =>
@@ -748,6 +752,24 @@ def preservation
         (preservation hbodyTyped heval_body henv_body hft hcinv_body
           (FnEnvDisjoint.bindParams hcapDisj _ _ hclosParams) hftc).liftFromEmptyΛ
       | .not_closure hnotcl _ _ => absurd rfl (hnotcl _ _ _)
+      | .recClosure hptys hrecEnv hbaseWT hbaseInv hbaseDisj hFname hclosParams hbodyTyped =>
+        let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc
+        let hvts' := hptys ▸ apr.hasTypes
+        let hlen_bp := by
+          have := hvts'.length_eq; simp [List.length_map] at this; omega
+        -- Build ClosureInvariant for recEnv: for name → use cinv_func, for others → use hbaseInv
+        let hcapCinv : ClosureInvariant _ (TyEnv.extend _ _ _) F := by
+          rw [hrecEnv]
+          exact ClosureInvariant.extend (fun x v τ h1 h2 => hbaseInv x v τ h1 h2) cinv_func
+        let hcapWT := hrecEnv ▸ EnvWellTyped.extend_preserves hbaseWT (hptys ▸ ValueHasType.closure)
+        let henv_body := EnvWellTyped.bindParams_preserves hcapWT _ _ hvts' hlen_bp
+        let hcinv_body := ClosureInvariant.bindParams hcapCinv _ _ hvts' hlen_bp
+          (fun i hv hτ => by
+            have := apr.closureOks i hv (by
+              subst hptys; simp [List.length_map]; exact hτ)
+            exact hptys ▸ this)
+        (preservation hbodyTyped heval_body henv_body hft hcinv_body
+          (FnEnvDisjoint.bindParams (hrecEnv ▸ hbaseDisj.extend hFname) _ _ hclosParams) hftc).liftFromEmptyΛ
     | .applyRawFn hΓ _ =>
       absurd (EnvWellTyped.lookup henv hΓ hclos) (fun h => ValueHasType.closure_not_rawFunc h)
     | .applyTopFn hF _ => absurd hF (by rw [hdisj.1 _ _ _ _ hclos]; exact fun h => nomatch h)

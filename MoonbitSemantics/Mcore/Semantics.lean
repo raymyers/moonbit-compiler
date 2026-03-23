@@ -206,9 +206,8 @@ inductive Eval (fnTable : FnTable) :
     Eval fnTable env s jt lt nl (.letfn name params fnBody body .nonRecursive) outcome s₁ nl₁
 
   | letfnRec :
-    Eval fnTable
-      (Env.extend env name (.closure (Env.extend env name (.closure env params fnBody)) params fnBody))
-      s jt lt nl body outcome s₁ nl₁ →
+    recEnv = Env.extend env name (.closure recEnv params fnBody) →
+    Eval fnTable recEnv s jt lt nl body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letfn name params fnBody body .recursive) outcome s₁ nl₁
 
   | letfnTailJoin :

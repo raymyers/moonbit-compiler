@@ -475,6 +475,17 @@ inductive ValClosureOk : Value → Mtype → FnTyTable → Prop where
     (hbody : HasType (TyEnv.bindParams TyEnv.empty params)
         JoinTyEnv.empty LoopTyEnv.empty F body retTy) →
     ValClosureOk (.rawFn params body) (.rawFunc paramTys retTy) F
+  | recClosure :
+    (hptys : paramTys = params.map (·.ty)) →
+    (hrecEnv : recEnv = Env.extend baseEnv name (.closure recEnv params body)) →
+    (hbaseWT : EnvWellTyped baseEnv Γbase) →
+    (hbaseInv : ∀ x v' τ', baseEnv x = some v' → Γbase x = some τ' → ValClosureOk v' τ' F) →
+    (hbaseDisj : FnEnvDisjoint baseEnv F) →
+    (hFname : F name = none) →
+    (hparams : ∀ p, p ∈ params → F p.binder = none) →
+    (hbody : HasType (TyEnv.bindParams (TyEnv.extend Γbase name (.func paramTys retTy)) params)
+        JoinTyEnv.empty LoopTyEnv.empty F body retTy) →
+    ValClosureOk (.closure recEnv params body) (.func paramTys retTy) F
 
 /-- Outcome typing. Break outcomes carry value typing from the Λ lookup. -/
 inductive OutcomeHasType : Outcome → Mtype → LoopTyEnv → FnTyTable → Prop where
