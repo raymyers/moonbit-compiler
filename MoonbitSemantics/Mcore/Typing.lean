@@ -439,36 +439,73 @@ inductive ValueListHasType : List Value → List Mtype → Prop where
 
 end
 
-/-- Outcome typing. -/
-inductive OutcomeHasType : Outcome → Mtype → Prop where
-  | val : ValueHasType v τ → OutcomeHasType (.val v) τ
-  | «break» : OutcomeHasType (.break _ _) τ
-  | «continue» : OutcomeHasType (.continue _ _) τ
-  | «return» : OutcomeHasType (.return _) τ
-  | error : OutcomeHasType (.error _) τ
+/-- An environment is well-typed wrt a typing environment. -/
+def EnvWellTyped (env : Env) (Γ : TyEnv) : Prop :=
+  ∀ x τ, Γ x = some τ → ∃ v, env x = some v ∧ ValueHasType v τ
+
+/-- Top-level functions and env closures don't overlap for the same variable. -/
+def FnEnvDisjoint (env : Env) (F : FnTyTable) : Prop :=
+  (∀ func cap ps bd, env func = some (.closure cap ps bd) → F func = none) ∧
+  (∀ func ps bd, env func = some (.rawFn ps bd) → F func = none)
+
+/-- A single value satisfies the closure invariant.
+    For closures, provides body typing + ClosureInvariant for captured env. -/
+inductive ValClosureOk : Value → Mtype → FnTyTable → Prop where
+  | not_closure :
+    (∀ cap ps bd, v ≠ .closure cap ps bd) →
+    (∀ vals, v ≠ .tuple vals) →
+    (∀ ps bd, v ≠ .rawFn ps bd) →
+    ValClosureOk v τ F
+  | tuple :
+    (hvals : ∀ i (hv : i < vals.length) (hτ : i < τs.length),
+      ValClosureOk (vals[i]'hv) (τs[i]'hτ) F) →
+    ValClosureOk (.tuple vals) (.tuple τs) F
+  | closure :
+    (hptys : paramTys = params.map (·.ty)) →
+    (hcapWT : EnvWellTyped captured Γcap) →
+    (hcapInv : ∀ x v' τ', captured x = some v' → Γcap x = some τ' → ValClosureOk v' τ' F) →
+    (hcapDisj : FnEnvDisjoint captured F) →
+    (hparams : ∀ p, p ∈ params → F p.binder = none) →
+    (hbody : HasType (TyEnv.bindParams Γcap params)
+        JoinTyEnv.empty LoopTyEnv.empty F body retTy) →
+    ValClosureOk (.closure captured params body) (.func paramTys retTy) F
+  | rawFn :
+    (hptys : paramTys = params.map (·.ty)) →
+    (hparams : ∀ p, p ∈ params → F p.binder = none) →
+    (hbody : HasType (TyEnv.bindParams TyEnv.empty params)
+        JoinTyEnv.empty LoopTyEnv.empty F body retTy) →
+    ValClosureOk (.rawFn params body) (.rawFunc paramTys retTy) F
+
+/-- Outcome typing. Break outcomes carry value typing from the Λ lookup. -/
+inductive OutcomeHasType : Outcome → Mtype → LoopTyEnv → FnTyTable → Prop where
+  | val : ValueHasType v τ → OutcomeHasType (.val v) τ Λ F
+  | breakSome : Λ label = some ⟨paramTys, τ_break⟩ →
+      ValueHasType v τ_break → ValClosureOk v τ_break F →
+      OutcomeHasType (Outcome.break (some v) label) τ Λ F
+  | breakNone : Λ label = some ⟨paramTys, .unit⟩ →
+      OutcomeHasType (Outcome.break none label) τ Λ F
+  | «continue» : OutcomeHasType (.continue _ _) τ Λ F
+  | «return» : OutcomeHasType (.return _) τ Λ F
+  | error : OutcomeHasType (.error _) τ Λ F
 
 /-- A closure is "semantically well-typed": calling with well-typed args
     produces well-typed outcomes. -/
 def ClosureSemanticTyping
     (captured : Env) (params : List Param) (body : Expr)
-    (retTy : Mtype) : Prop :=
+    (retTy : Mtype) (F : FnTyTable) : Prop :=
   ∀ (ft : FnTable) (args : List Value) (s : Store) (jt : JoinTable)
     (lt : LoopTable) (nl : Loc) (outcome : Outcome) (s' : Store) (nl' : Loc),
     ValueListHasType args (params.map (·.ty)) →
     Eval ft (Env.bindParams captured params args) s jt lt nl body outcome s' nl' →
-    OutcomeHasType outcome retTy
+    OutcomeHasType outcome retTy LoopTyEnv.empty F
 
 /-- Same for raw functions. -/
 def RawFnSemanticTyping
-    (params : List Param) (body : Expr) (retTy : Mtype) : Prop :=
+    (params : List Param) (body : Expr) (retTy : Mtype) (F : FnTyTable) : Prop :=
   ∀ (ft : FnTable) (args : List Value) (s : Store) (jt : JoinTable)
     (lt : LoopTable) (nl : Loc) (outcome : Outcome) (s' : Store) (nl' : Loc),
     ValueListHasType args (params.map (·.ty)) →
     Eval ft (Env.bindParams Env.empty params args) s jt lt nl body outcome s' nl' →
-    OutcomeHasType outcome retTy
-
-/-- An environment is well-typed wrt a typing environment. -/
-def EnvWellTyped (env : Env) (Γ : TyEnv) : Prop :=
-  ∀ x τ, Γ x = some τ → ∃ v, env x = some v ∧ ValueHasType v τ
+    OutcomeHasType outcome retTy LoopTyEnv.empty F
 
 end Moonbit.Mcore
