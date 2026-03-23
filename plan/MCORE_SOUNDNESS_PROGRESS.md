@@ -67,150 +67,259 @@ handleErrorReturnErrOk/Err, handleErrorPropagate
 - `ValueHasType.loc_not_tuple`: loc value ≠ tuple type
 - `ValueHasType.closure_not_rawFunc`: closure value ≠ rawFunc type
 - `ValueHasType.rawFn_not_func`: rawFn value ≠ func type
-- `evalPrim_type_sound'`: evalPrim preserves types (1-arg fully, 2-arg sorry)
+- `evalPrim_type_sound'`: evalPrim preserves types (fully proven)
+- `evalPrim_non_identity_constOrUnit`: non-identity evalPrim returns const or unit
 
-## Remaining sorry: 28 total (26 Preservation + 2 PrimTyping)
+## Remaining sorry: 11 total (9 Preservation + 2 FreeVars)
 
-### Barrier 1: ClosureInvariant maintenance (7 sorry)
+Note: FreeVars.lean sorry are termination proofs (`decreasing_by all_goals sorry`)
+— a Lean 4 limitation on ∀-quantified sub-derivations in structural recursion.
 
-**Where:** let (1), letfnNonrec (1), letfnRec (1), applyClosure body (1),
-loopVal (1), loopReturn (1), loopError (1)
+Progress from original 28 sorry:
+- **17 sorry closed** (28 → 11):
+  - let, letfnNonrec, applyClosure body, loopVal, loopReturn, loopError,
+    applyTopFn body, var/varPrim ValClosureOk, applyClosure×applyTopFn,
+    applyRawFn×applyTopFn, applyTopFn×applyClosure, applyTopFn×applyRawFn,
+    fieldTuple ValClosureOk (P3), evalPrim ValClosureOk (P6),
+    applyRawFn body (P7), PrimTyping ep2_const_const, PrimTyping 2-arg branch
+- PrimTyping.lean: 2/2 closed
+- FreeVars.lean: 3/5 closed
+- Preservation.lean: 12/21 closed
 
-**What's needed:**
-When the env is extended (by let-binding, function definition, or param binding),
-the `ClosureInvariant` must be maintained for the new env. `extend_closure` and
-`extend_non_closure` exist, but constructing `Γcap` (the typing context for the
-captured env) requires:
+### Architecture changes made
 
-1. `FreeVars : Expr → Finset Var` — compute free variables of an expression
-2. `Env.ofCapture_wellTyped`: if `EnvWellTyped env Γ` and `fvs ⊇ FreeVars body`,
-   then `EnvWellTyped (Env.ofCapture (Env.capture env fvs)) (Γ.restrict fvs)`
-3. `HasType.weaken_env`: if `HasType Γ e τ` and `FreeVars e ⊆ dom Γ'` and
-   `∀ x ∈ FreeVars e, Γ' x = Γ x`, then `HasType Γ' e τ`
+**Closure capture refactor:** Changed `Value.closure` from carrying
+`List (Var × Value)` (via `Env.capture`) to carrying `Var → Option Value`
+(the full env). This eliminates the FreeVars/weakening requirement:
+closures capture the entire environment, so `EnvWellTyped captured Γ` holds
+trivially when the closure was created in env with `EnvWellTyped env Γ`.
 
-**Estimated effort:** ~100 lines for FreeVars, ~50 lines for the two lemmas.
+**Preservation strengthened:** `preservation` now returns `PresResult` which
+bundles `OutcomeHasType` with `ValClosureOk` (for val outcomes). `ValClosureOk`
+is an inductive that carries body typing + `ClosureInvariant` for the captured
+env. This allows ClosureInvariant maintenance at env extension points.
 
-### Barrier 2: Apply cross-typing (6 sorry)
+**ClosureInvariant simplified:** Now `∀ x v τ, env x = some v → Γ x = some τ →
+ValClosureOk v τ F`, with a single `extend` lemma taking `ValClosureOk`.
 
-**Where:** applyClosure×applyTopFn (2), applyTopFn×applyClosure (1),
-applyTopFn×applyRawFn (1), applyRawFn×applyTopFn (1), applyTopFn body (1)
+### Proven since last report
 
-**What's needed:**
-When the eval says "call via closure" but the typing says "call via fnTable"
-(or vice versa), these should be contradictions: the env maps `func` to a
-specific value kind, and the typing maps it to the corresponding type kind.
-The fnTable cases are different: `applyTopFn` eval uses `fnTable func` while
-`applyClosure` typing uses `Γ func`. Need a lemma relating fnTable and Γ.
+- **let** ClosureInvariant: extract ValClosureOk from preservation IH on rhs
+- **letfnNonrec** ClosureInvariant: use `ValClosureOk.mk_closure` with env/Γ
+- **var/varPrim** ValClosureOk: extract from ClosureInvariant via hcinv lookup
+- **HasType.strengthen**: env monotonicity lemma (bigger Γ → still well-typed)
+- **TyEnv.extend_mono, extendMany_mono, bindParams_mono**: subset propagation
 
-Also `applyTopFn` body needs reconciling `ft func = some (params✝, fnBody✝)`
-(from eval) with `ft func = some (params, body)` (from FnTableWellTyped) to
-show `params✝ = params` and `fnBody✝ = body`.
+### ~~Barrier 1: fieldTuple ValClosureOk~~ — CLOSED (P3)
 
-**Estimated effort:** ~30 lines (Option.some injectivity + fn table coherence).
+Solved via `ValClosureOk.tuple_getAt?` for per-element extraction.
 
-### Barrier 3: Switch binder unification (4 sorry)
+### ~~Barrier 2: Apply + FnEnvDisjoint threading~~ — CLOSED
 
-**Where:** switchConstr match (1), switchConstrDefault (1),
+All cross-typing contradictions and FnEnvDisjoint threading resolved.
+applyRawFn body (P7) closed via rawFn ValClosureOk constructor.
+
+### Barrier 3: Switch (4 sorry)
+
+**Where:** switchConstr match (1), switchConstr×switchConstrDefault (1),
 switchConstrDefault×switchConstrCase (1), switchConstantMatch (1)
 
-**What's needed:**
-The `Eval.switchConstr` and `HasType.switchConstrCase` both use
-`match binder with | some x => extend env x val | none => env`.
-Lean can't automatically unify the implicit `binder` from the eval constructor
-with the `binder` from the typing constructor.
+**What's needed:** The typing rules `switchConstrCase` and `switchConstrDefault`
+don't deterministically match the eval rule. The eval finds a specific case;
+the typing could type via any case OR the default. Cross-cases arise when
+eval and typing pick different paths.
 
-Fix: restructure the typing rules to separate the binder case explicitly,
-or use a tactic proof block inside the term-mode `preservation` to case-split
-on `binder`.
+**Fix:** Restructure typing to either (a) type ALL branches (like switchConstant's
+`∀ i` rule) or (b) add determinism — if a case matches, must use the case rule.
 
-**Estimated effort:** ~40 lines (typing rule restructure or tactic insertion).
+**Estimated effort:** ~60 lines (typing rule restructure).
 
 ### Barrier 4: Loop break value typing (3 sorry)
 
 **Where:** loopBreak (1), loopBreakNone (1), loopContinue (1)
 
-**What's needed:**
-`OutcomeHasType.break` doesn't carry the break value's type. When the loop body
-evaluates to `.break (some v) label`, preservation gives `OutcomeHasType (.break
-(some v) label) τ = .break` which doesn't include `ValueHasType v τ`.
+**What's needed:** Same as before — `OutcomeHasType.break` doesn't carry the
+break value's type. Strengthen to `BreakValueTyped` invariant.
 
-The break value IS well-typed (HasType.break types the arg at the loop's type),
-but this information is lost through `OutcomeHasType.break`.
-
-Fix option A: Strengthen `OutcomeHasType.break` to `breakSome : ValueHasType v τbreak →
-OutcomeHasType (.break (some v) label) τ` where `τbreak` is existentially quantified.
-Then rewrite ALL abort propagation cases to use `weaken` (which preserves the
-`ValueHasType` witness). This was attempted but the weaken for break can't change
-`τbreak`, so the loop boundary can't extract `ValueHasType v τ`.
-
-Fix option B: Add a separate `BreakValueTyped` invariant to preservation that
-tracks `∀ v label, outcome = .break (some v) label → ∃ τbreak, ValueHasType v τbreak`.
-The loop catches the break and uses the typing rules to show `τbreak = τ`.
-
-Fix option C: Prove loopBreak by induction on the body's eval rather than using
-the preservation IH. Directly show that the break value is well-typed from the
-body's typing + the break typing rule.
-
-**Estimated effort:** ~60 lines for option C (most targeted).
+**Estimated effort:** ~60 lines.
 
 ### Barrier 5: Field TypeDefs (2 sorry)
 
 **Where:** fieldConstr×fieldHeap (1), fieldRecord×fieldHeap (1)
 
-**What's needed:**
-`HasType.fieldHeap` produces an unconstrained `fieldTy`. Without `TypeDefs`
-(which maps `tid` to constructor/record field types), we can't constrain
-`fieldTy` to match the actual value at position `pos`.
+**What's needed:** Same as before — constrain `fieldTy` via `TypeDefs`.
 
-Fix: add `TypeDefs` as a parameter to `HasType`, constrain `fieldTy` via
-`TypeDefs tid = some info ∧ info.fields[pos] = fieldTy`.
+**Estimated effort:** ~50 lines.
 
-**Estimated effort:** ~50 lines (add TypeDefs parameter, update field rules).
+### ~~Barrier 6: evalPrim~~ — CLOSED (P6 + PrimTyping)
 
-### Barrier 6: evalPrim 2-arg (2 sorry)
+PrimTyping: closed via exhaustive case analysis with `simp_all`.
+evalPrim ValClosureOk (P6): solved via `evalPrim_non_identity_constOrUnit` in
+EvalPrimForm.lean — uses `unfold evalPrim; split at heval <;> simp_all` to match
+on `evalPrim`'s definition branches (~15 goals) instead of exhaustive value-type
+case splits (~80K goals that OOMed).
 
-**Where:** PrimTyping.lean: ep2_const_const (1), main theorem 2-arg branch (1)
+### Barrier 7: Other (5 sorry)
 
-**What's needed:**
-The 2-arg case requires `cases c1 <;> cases c2 <;> cases op` (9×9×11 = 891
-subcases). `simp_all` closes ~889 of them. The remaining 2 (int×int with
-cmp ops) leave a goal where `v` and `τ` aren't substituted by `simp_all`.
+- **letfnRec (1):** Inner closure captures `env` without `name`, but body
+  is typed under `TyEnv.extend Γ name funcTy`. Fix: change Eval.letfnRec
+  so both inner and outer closures capture the same extended env.
 
-Fix: extract into 9×9 = 81 per-Const-pair lemmas, each proven by
-`cases op <;> simp_all <;> subst_vars <;> exact .const`.
+- **letrec (1):** Recursive env fixpoint — needs ClosureInvariant for the
+  mutually-recursive binding group.
 
-**Estimated effort:** ~100 lines (boilerplate, mechanically generated).
+- **handleErrorJoinErr (1) + applyJoin (1):** Need `JoinWellTyped` hypothesis.
 
-### Barrier 7: Other (4 sorry)
+- **loopContinue (1):** Re-entry typing — same body is evaluated again with
+  new args. Needs the loop body typing to be reusable across iterations.
 
-- **letrec (1):** Recursive env fixpoint. All closures in the binding group
-  reference each other. Standard approach: build ClosureInvariant for the
-  recursive env by showing each body is well-typed in that env.
-  ~30 lines.
+## Action plan (ordered by dependency)
 
-- **handleErrorJoinErr (1):** Need `JoinWellTyped` hypothesis relating `jt`
-  (runtime join table) to `Δ` (join typing env). Similar to FnTableWellTyped.
-  ~20 lines to define + thread through.
+Based on external review of the barrier analysis.
+Guiding principle: lock in invariants first, refactor typing rules second,
+leave mechanical boilerplate last.
 
-- **applyJoin (1):** Same as handleErrorJoinErr — needs JoinWellTyped.
+### Step 1 — FreeVars + env restriction + ClosureInvariant (unlocks 7+2 sorry)
 
-- **applyRawFn body (1):** Similar to applyClosure but for raw functions.
-  Need `EnvWellTyped (Env.bindParams Env.empty params argVals)
-  (TyEnv.bindParams TyEnv.empty params)` which follows from
-  `EnvWellTyped.empty` + `bindParams_preserves`. ~10 lines.
+**Create `Mcore/FreeVars.lean`** (new file, ~100 lines):
+- Structurally recursive `FreeVars : Expr → Finset Var`
+- Spec: `x ∈ FreeVars e ↔ x occurs free in e`
 
-## Estimated total effort to close all sorry
+**Prove two key lemmas** (in FreeVars.lean, ~50 lines):
+1. `HasType.weaken_env`: if `HasType Γ e τ` and `Γ'` agrees with `Γ` on
+   `FreeVars e`, then `HasType Γ' e τ`. (Monotonicity / weakening.)
+2. `EnvWellTyped.restrict`: if `EnvWellTyped env Γ` and `fvs ⊇ FreeVars body`,
+   then `EnvWellTyped (Env.ofCapture (Env.capture env fvs)) (Γ.restrict fvs)`.
 
-| Barrier | Sorry | Lines | Priority |
-|---------|-------|-------|----------|
-| FreeVars + env restriction | 7 | ~150 | High |
-| Apply cross-typing | 6 | ~30 | Medium |
-| evalPrim 2-arg | 2 | ~100 | Low (mechanical) |
-| Switch binder | 4 | ~40 | Medium |
-| Loop break value | 3 | ~60 | Medium |
-| Field TypeDefs | 2 | ~50 | Low |
-| Other (letrec, join, rawFn) | 4 | ~60 | Medium |
-| **Total** | **28** | **~490** | |
+**Factor out a single maintenance lemma** (in Preservation.lean):
+```lean
+ClosureInvariant env Γ F →
+HasType Γ body τ →
+ClosureInvariant (env.extend x v) (Γ.extend x τ) F
+```
+Proof: pick `fvs := FreeVars body`, use restrict, stitch with
+`extend_closure` / `extend_non_closure`.
+
+This closes the 7 Barrier 1 sorry (let, letfnNonrec, letfnRec,
+applyClosure body, loopVal, loopReturn, loopError).
+
+Also enables:
+- **letrec** (Barrier 7): build ClosureInvariant for the recursive env by
+  showing each body well-typed in the fixpoint context. ~30 lines.
+- **applyRawFn body** (Barrier 7): generic lemma
+  `EnvWellTyped.empty + bindParams_preserves`. ~10 lines.
+
+### Step 2 — FnTableWellTyped + JoinWellTyped + apply cross-typing (unlocks 6+2 sorry)
+
+**FnTable coherence** — `FnTableWellTyped` already exists (Preservation.lean:51).
+Add injectivity + value-kind lemmas (~15 lines):
+```lean
+lemma fnTable_some_inj :
+  ft f = some (p1, b1) → ft f = some (p2, b2) → p1 = p2 ∧ b1 = b2
+
+-- closure value can't come from fnTable, and vice versa
+lemma ValueHasType.closure_not_topFn ...
+lemma ValueHasType.topFn_not_closure ...
+```
+
+Use these to close `applyTopFn×applyClosure`, `applyClosure×applyTopFn`,
+`applyTopFn×applyRawFn`, `applyRawFn×applyTopFn` (4 cross-typing sorry)
+plus `applyTopFn body` (1 sorry, via `fnTable_some_inj` to unify params/body).
+
+**JoinWellTyped** — new invariant (~20 lines definition + threading):
+```lean
+def JoinWellTyped (jt : JoinTable) (Δ : JoinTyEnv) : Prop :=
+  ∀ label params body paramTys resultTy,
+    jt label = some (params, body) →
+    Δ label = some ⟨paramTys, resultTy⟩ →
+    HasType (TyEnv.bindParams TyEnv.empty params) ... body resultTy
+```
+Thread through preservation. Closes `handleErrorJoinErr` and `applyJoin` (2 sorry).
+
+### Step 3 — Loop break value typing (unlocks 3 sorry)
+
+**Option B (recommended): `BreakValueTyped` invariant.**
+
+Define:
+```lean
+def BreakValueTyped (out : Outcome) : Prop :=
+  ∀ v label, out = .break (some v) label → ∃ τ, ValueHasType v τ
+```
+
+Strengthen preservation to return `BreakValueTyped out ∧ OutcomeHasType out τ`.
+
+For most cases `BreakValueTyped` is trivial:
+- Non-break outcomes: `by intros v label h; cases h`
+- Break propagation: reuse IH's `BreakValueTyped`
+
+In the loop case: extract `τbreak` from `BreakValueTyped`, then use
+`HasType.break` + `LoopTyEnv.extend` to show `τbreak = τ`.
+
+Closes `loopBreak`, `loopBreakNone`, `loopContinue` (3 sorry).
+
+### Step 4 — Switch binder refactor (unlocks 4 sorry)
+
+**Split `switchConstrCase` into two typing rules:**
+```lean
+| switchConstrCase_some :
+    HasType Γ obj (.constr tid) →
+    findConstrCase cases tag = some (some x, branch) →
+    HasType (TyEnv.extend Γ x (.constr tid)) branch τ →
+    HasType Γ (.switchConstr obj cases dflt) τ
+
+| switchConstrCase_none :
+    HasType Γ obj (.constr tid) →
+    findConstrCase cases tag = some (none, branch) →
+    HasType Γ branch τ →
+    HasType Γ (.switchConstr obj cases dflt) τ
+```
+
+Now preservation can `cases binder` first and pick the matching rule.
+Also add extraction of branch typing from `∀ i` for `switchConstantMatch`.
+
+Closes `switchConstr match`, `switchConstrDefault×switchConstrCase`,
+`switchConstrDefault`, `switchConstantMatch` (4 sorry).
+
+### Step 5 — Field TypeDefs (unlocks 2 sorry)
+
+Thread `TypeDefs` as a parameter through `HasType` where field rules appear.
+
+Replace the unconstrained `fieldTy` in `HasType.fieldHeap` with:
+```lean
+| fieldHeap :
+    HasType Γ rec_ (.constr tid) →
+    td tid = some info →
+    info.fields.get? pos = some fieldTy →
+    HasType Γ (.field rec_ acc pos) fieldTy
+```
+
+Carry `TypeDefsWellTyped td` through preservation.
+
+Closes `fieldConstr×fieldHeap`, `fieldRecord×fieldHeap` (2 sorry).
+
+### Step 6 — evalPrim 2-arg boilerplate (unlocks 2 sorry)
+
+Extract per-const-pair lemmas (9×9 = 81 templates, ~889/891 closed by
+`simp_all`). For the 2 surviving int×int cmp cases:
+```lean
+cases op <;> simp_all [evalPrim2] <;> subst_vars <;> exact .const
+```
+
+Purely mechanical — save for last.
+
+### Revised summary table
+
+| Step | Barrier | Sorry | Approach | Status |
+|------|---------|-------|----------|--------|
+| ~~1~~ | ~~fieldTuple ValClosureOk~~ | ~~1~~ | ~~Per-element ValClosureOk~~ | CLOSED |
+| ~~2~~ | ~~Apply cross-typing~~ | ~~5~~ | ~~Consistency + rawFn constructor~~ | CLOSED |
+| 3 | Switch typing rules | 0* | Restructure to type all branches | *Already resolved* |
+| 4 | Loop break/continue | 3 | BreakContinueTyped + re-entry | Open |
+| 5 | Field TypeDefs | 2 | Thread TypeDefs through HasType | Open |
+| ~~6~~ | ~~evalPrim~~ | ~~3~~ | ~~split tactic + simp_all~~ | CLOSED |
+| 7 | Other (letfnRec, letrec, join) | 4 | Per-case fixes | Open |
+| **Total** | | **9** (Preservation) | | |
+| FreeVars | termination | 2 | Well-founded recursion | Open |
 
 ## Files
 
@@ -221,14 +330,15 @@ Fix: extract into 9×9 = 81 per-Const-pair lemmas, each proven by
 | Clam/Semantics.lean | 282 | 0 | 22 eval rules + CSLib LTS |
 | Mcore/Types.lean | 96 | 0 | Mtype (24 constructors) |
 | Mcore/Syntax.lean | 122 | 0 | Expr (29 constructors) |
-| Mcore/Values.lean | 146 | 0 | Values, store, env, outcome |
+| Mcore/Values.lean | 139 | 0 | Values (closure captures Env), store, env |
 | Mcore/Semantics.lean | 688 | 0 | 87 eval rules + abort propagation |
-| Mcore/Typing.lean | 475 | 0 | 47 HasType + ValueHasType + OutcomeHasType |
-| Mcore/PrimTyping.lean | 86 | 2 | evalPrim type soundness |
-| Mcore/Preservation.lean | 504 | 26 | Type preservation proof |
+| Mcore/Typing.lean | 471 | 0 | 47 HasType + ValueHasType + OutcomeHasType |
+| Mcore/FreeVars.lean | 135 | 2 | HasType.strengthen + TyEnv monotonicity |
+| Mcore/PrimTyping.lean | 83 | 0 | evalPrim type soundness |
+| Mcore/EvalPrimForm.lean | 16 | 0 | evalPrim non-identity returns const/unit |
+| Mcore/Preservation.lean | 868 | 9 | Type preservation (PresResult + ValClosureOk) |
 | Mcore/Simulation.lean | 180 | 0 | Mcore→Clam value/type correspondence |
 | Examples.lean | 277 | 0 | 9 end-to-end evaluation examples |
 | Clam.lean | 3 | 0 | Root import |
 | Mcore.lean | 8 | 0 | Root import |
-| MoonbitSemantics.lean | 5 | 0 | Root import |
-| **Total** | **3207** | **28** | |
+| **Total** | **~3550** | **11** | |

@@ -5,5 +5,6 @@ import MoonbitSemantics.Mcore.Semantics
 import MoonbitSemantics.Mcore.Typing
 import MoonbitSemantics.Mcore.FreeVars
 import MoonbitSemantics.Mcore.PrimTyping
+import MoonbitSemantics.Mcore.EvalPrimForm
 import MoonbitSemantics.Mcore.Preservation
 import MoonbitSemantics.Mcore.Simulation

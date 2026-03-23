@@ -5,6 +5,7 @@
 -/
 import MoonbitSemantics.Mcore.Typing
 import MoonbitSemantics.Mcore.PrimTyping
+import MoonbitSemantics.Mcore.EvalPrimForm
 
 namespace Moonbit.Mcore
 
@@ -459,8 +460,16 @@ private theorem evalPrim_valClosureOk
     exact .not_closure (fun _ _ _ h => by cases h) (fun _ h => by cases h)
       (fun _ _ h => by cases h)
   | .closure _ _ _ | .tuple _ | .rawFn _ _ =>
-    -- Identity passes through; non-identity never produces closure/tuple/rawFn.
-    sorry
+    have hid : op = .identity := by
+      by_contra hop
+      rcases evalPrim_non_identity_constOrUnit hop heval with ⟨_, h⟩ | h <;> exact nomatch h
+    subst hid; revert heval; cases hargs with
+    | nil => exact nofun
+    | cons h1 rest => cases rest with
+      | nil => simp [evalPrim]; intro heq; subst heq
+               simp [typeOfPrim] at hprim; subst hprim
+               exact hclos 0 (by simp) (by simp)
+      | cons => exact nofun
 
 /-- Result of preservationArgs: value list typing + per-element ValClosureOk. -/
 structure ArgsPresResult (vs : List Value) (τs : List Mtype) (F : FnTyTable) where
