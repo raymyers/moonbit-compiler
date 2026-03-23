@@ -484,7 +484,11 @@ inductive OutcomeHasType : Outcome → Mtype → LoopTyEnv → FnTyTable → Pro
       OutcomeHasType (Outcome.break (some v) label) τ Λ F
   | breakNone : Λ label = some ⟨paramTys, .unit⟩ →
       OutcomeHasType (Outcome.break none label) τ Λ F
-  | «continue» : OutcomeHasType (.continue _ _) τ Λ F
+  | «continue» : Λ label = some ⟨paramTys, τ_loop⟩ →
+      ValueListHasType args paramTys →
+      (∀ i (hv : i < args.length) (hτ : i < paramTys.length),
+        ValClosureOk (args[i]'hv) (paramTys[i]'hτ) F) →
+      OutcomeHasType (.continue args label) τ Λ F
   | «return» : OutcomeHasType (.return _) τ Λ F
   | error : OutcomeHasType (.error _) τ Λ F
 

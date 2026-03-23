@@ -20,7 +20,7 @@ open Moonbit.Clam (Const Prim ArithOp CmpOp)
 def OutcomeHasType.weaken : OutcomeHasType o τ₁ Λ F → o.isAbort → OutcomeHasType o τ₂ Λ F
   | .breakSome hΛ hvt hcl, _ => .breakSome hΛ hvt hcl
   | .breakNone hΛ, _ => .breakNone hΛ
-  | .continue, _ => .continue
+  | .continue hΛ hvts hclos, _ => .continue hΛ hvts hclos
   | .return, _ => .return
   | .error, _ => .error
 
@@ -383,9 +383,14 @@ def PresResult.breakNone'
   hasType := .breakNone hΛ
   closureOk := fun _ h => nomatch h
 
-/-- Continue result. -/
-def PresResult.continue' : PresResult (.continue args label) τ F Λ where
-  hasType := .continue
+/-- Continue result with typed args. -/
+def PresResult.continue'
+    (hΛ : Λ label = some ⟨paramTys, τ_loop⟩)
+    (hvts : ValueListHasType args paramTys)
+    (hclos : ∀ i (hv : i < args.length) (hτ : i < paramTys.length),
+      ValClosureOk (args[i]'hv) (paramTys[i]'hτ) F) :
+    PresResult (.continue args label) τ F Λ where
+  hasType := .continue hΛ hvts hclos
   closureOk := fun _ h => nomatch h
 
 /-- Return result. -/
@@ -401,7 +406,7 @@ def PresResult.liftFromEmptyΛ (pr : PresResult outcome τ F LoopTyEnv.empty) :
     | val hvt => exact .val hvt
     | breakSome hΛ => exact absurd hΛ (by simp [LoopTyEnv.empty])
     | breakNone hΛ => exact absurd hΛ (by simp [LoopTyEnv.empty])
-    | «continue» => exact .continue
+    | «continue» hΛ => exact absurd hΛ (by simp [LoopTyEnv.empty])
     | «return» => exact .return
     | error => exact .error
   closureOk := pr.closureOk
@@ -591,7 +596,10 @@ def preservation
       .breakSome' (pr.hasType.getVal) (pr.closureOk _ rfl) hΛ
   | .breakNone => match htype with
     | .breakNone hΛ => .breakNone' hΛ
-  | .continue _ => .continue'
+  | .continue heval_args => match htype with
+    | .continue hΛ htype_args =>
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc
+      .continue' hΛ apr.hasTypes apr.closureOks
 
   -- ════════ Simple value-producing cases ════════
   | .assign _ => match htype with
@@ -853,7 +861,7 @@ def preservation
           simp [LoopTyEnv.extend] at hΛ
           obtain ⟨_, rfl⟩ := hΛ
           exact PresResult.val' .unit (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
-  | .loopContinue _ _ _ heval_reentry => sorry -- needs re-entry typing
+  | .loopContinue _ _ _ heval_reentry => sorry -- needs: Λ lift for re-entry (semantic issue with uncaught breaks)
   | .loopReturn heval_args heval_body => match htype with
     | .loop _ htype_args htype_body => .return'
   | .loopError heval_args heval_body => match htype with
