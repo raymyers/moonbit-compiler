@@ -53,7 +53,7 @@ def FnTableWellTyped (ft : FnTable) (F : FnTyTable) : Prop :=
       params.map (·.ty) = paramTys ∧
       (∀ p, p ∈ params → F p.binder = none) ∧
       HasType (TyEnv.bindParams TyEnv.empty params)
-        JoinTyEnv.empty LoopTyEnv.empty F body retTy
+        JoinTyEnv.empty LoopTyEnv.empty F none body retTy
 
 /-- FnEnvDisjoint is preserved when extending env, if F doesn't contain the key. -/
 theorem FnEnvDisjoint.extend
@@ -198,7 +198,7 @@ theorem ValClosureOk.mk_closure
     (hdisj : FnEnvDisjoint captured F)
     (hparams : ∀ p, p ∈ params → F p.binder = none)
     (hbody : HasType (TyEnv.bindParams Γcap params)
-        JoinTyEnv.empty LoopTyEnv.empty F body retTy) :
+        JoinTyEnv.empty LoopTyEnv.empty F none body retTy) :
     ValClosureOk (.closure captured params body) (.func (params.map (·.ty)) retTy) F :=
   .closure rfl henv hcinv hdisj hparams hbody
 
@@ -430,19 +430,23 @@ Preservation returns both:
    (needed to maintain ClosureInvariant when the value enters an env)
 -/
 
-/-- Combined preservation result: outcome typing + closure invariant for values. -/
-structure PresResult (outcome : Outcome) (τ : Mtype) (F : FnTyTable) (Λ : LoopTyEnv) where
+/-- Combined preservation result: outcome typing + closure invariant for values.
+    The `E` parameter tracks the expected error type for `returnErr` within this scope.
+    `errorTyped` provides that any error outcome's value has the expected error type. -/
+structure PresResult (outcome : Outcome) (τ : Mtype) (E : Option Mtype) (F : FnTyTable) (Λ : LoopTyEnv) where
   hasType : OutcomeHasType outcome τ Λ F
   closureOk : ∀ v, outcome = .val v → ValClosureOk v τ F
+  errorTyped : ∀ v errTy, outcome = .error v → E = some errTy → ValueHasType v errTy
 
 def PresResult.val' (hvt : ValueHasType v τ) (hcl : ValClosureOk v τ F) :
-    PresResult (.val v) τ F Λ where
+    PresResult (.val v) τ E F Λ where
   hasType := .val hvt
   closureOk := fun _ h => by cases h; exact hcl
+  errorTyped := fun _ _ h => nomatch h
 
 /-- Weaken: change the expected type when the outcome is an abort. -/
-def PresResult.weaken (pr : PresResult outcome τ₁ F Λ) (hab : outcome.isAbort) :
-    PresResult outcome τ₂ F Λ where
+def PresResult.weaken (pr : PresResult outcome τ₁ E F Λ) (hab : outcome.isAbort) :
+    PresResult outcome τ₂ E F Λ where
   hasType := pr.hasType.weaken hab
   closureOk := fun v h => by
     cases outcome with
@@ -451,21 +455,40 @@ def PresResult.weaken (pr : PresResult outcome τ₁ F Λ) (hab : outcome.isAbor
     | «continue» => cases h
     | «return» => cases h
     | error => cases h
+  errorTyped := pr.errorTyped
+
+/-- Weaken: change both τ and E when the outcome is a non-error abort
+    (break/continue/return). -/
+def PresResult.weakenE (pr : PresResult outcome τ₁ E₁ F Λ) (hab : outcome.isAbort)
+    (hnoterr : ∀ v, outcome ≠ .error v) :
+    PresResult outcome τ₂ E₂ F Λ where
+  hasType := pr.hasType.weaken hab
+  closureOk := fun v h => by
+    cases outcome with
+    | val => exact absurd hab (by simp [Outcome.isAbort])
+    | «break» => cases h
+    | «continue» => cases h
+    | «return» => cases h
+    | error => cases h
+  errorTyped := fun v _ h _ => by
+    have := hnoterr v; contradiction
 
 /-- Break with a typed value. -/
 def PresResult.breakSome'
     (hvt : ValueHasType v τ_break) (hcl : ValClosureOk v τ_break F)
     (hΛ : Λ label = some ⟨paramTys, τ_break⟩) :
-    PresResult (Outcome.break (some v) label) τ F Λ where
+    PresResult (Outcome.break (some v) label) τ E F Λ where
   hasType := .breakSome hΛ hvt hcl
   closureOk := fun _ h => nomatch h
+  errorTyped := fun _ _ h => nomatch h
 
 /-- Break with none (unit type). -/
 def PresResult.breakNone'
     (hΛ : Λ label = some ⟨paramTys, .unit⟩) :
-    PresResult (Outcome.break none label) τ F Λ where
+    PresResult (Outcome.break none label) τ E F Λ where
   hasType := .breakNone hΛ
   closureOk := fun _ h => nomatch h
+  errorTyped := fun _ _ h => nomatch h
 
 /-- Continue result with typed args. -/
 def PresResult.continue'
@@ -473,18 +496,20 @@ def PresResult.continue'
     (hvts : ValueListHasType args paramTys)
     (hclos : ∀ i (hv : i < args.length) (hτ : i < paramTys.length),
       ValClosureOk (args[i]'hv) (paramTys[i]'hτ) F) :
-    PresResult (.continue args label) τ F Λ where
+    PresResult (.continue args label) τ E F Λ where
   hasType := .continue hΛ hvts hclos
   closureOk := fun _ h => nomatch h
+  errorTyped := fun _ _ h => nomatch h
 
 /-- Return result. -/
-def PresResult.return' : PresResult (.return v) τ F Λ where
+def PresResult.return' : PresResult (.return v) τ E F Λ where
   hasType := .return
   closureOk := fun _ h => nomatch h
+  errorTyped := fun _ _ h => nomatch h
 
 /-- Lift from LoopTyEnv.empty: breaks under empty Λ are impossible. -/
-def PresResult.liftFromEmptyΛ (pr : PresResult outcome τ F LoopTyEnv.empty) :
-    PresResult outcome τ F Λ where
+def PresResult.liftFromEmptyΛ (pr : PresResult outcome τ E F LoopTyEnv.empty) :
+    PresResult outcome τ E F Λ where
   hasType := by
     cases pr.hasType with
     | val hvt => exact .val hvt
@@ -494,16 +519,42 @@ def PresResult.liftFromEmptyΛ (pr : PresResult outcome τ F LoopTyEnv.empty) :
     | «return» => exact .return
     | error hvt => exact .error hvt
   closureOk := pr.closureOk
+  errorTyped := pr.errorTyped
 
 /-- Lift from an inner Λ when the outcome is a value (break info vacuous). -/
-def PresResult.liftVal (pr : PresResult (.val v) τ F Λ₁) :
-    PresResult (.val v) τ F Λ₂ :=
+def PresResult.liftVal (pr : PresResult (.val v) τ E F Λ₁) :
+    PresResult (.val v) τ E F Λ₂ :=
   .val' (pr.hasType.getVal) (pr.closureOk _ rfl)
 
-/-- Error result. -/
-def PresResult.error' (hvt : ValueHasType v errTy) : PresResult (.error v) τ F Λ where
+/-- Change E for a val outcome (errorTyped is vacuous for val). -/
+def PresResult.liftValE (pr : PresResult (.val v) τ E₁ F Λ) :
+    PresResult (.val v) τ E₂ F Λ :=
+  .val' (pr.hasType.getVal) (pr.closureOk _ rfl)
+
+/-- Change E from none to any E (errorTyped for none is vacuous). -/
+def PresResult.liftFromNoneE (pr : PresResult outcome τ none F Λ) :
+    PresResult outcome τ E F Λ where
+  hasType := pr.hasType
+  closureOk := pr.closureOk
+  errorTyped := fun _ _ h hE => by
+    -- Error values from closure/function bodies (E=none) need E-matching at outer scope.
+    -- This requires tracking error types across function boundaries (secondary sorry).
+    exact sorry
+
+/-- Error result with known error type matching E (used by returnErr). -/
+def PresResult.errorKnown (hvt : ValueHasType v errTy) (hE : E = some errTy) :
+    PresResult (.error v) τ E F Λ where
   hasType := .error hvt
   closureOk := fun _ h => nomatch h
+  errorTyped := fun _ errTy' h hE' => by cases h; rw [hE] at hE'; cases hE'; exact hvt
+
+/-- Error result preserving errorTyped from an inner PresResult (type/Λ weakening). -/
+def PresResult.errorWeaken (pr : PresResult (.error v) τ₁ E F Λ₁) :
+    PresResult (.error v) τ₂ E F Λ₂ where
+  hasType := by
+    let .error hvt := pr.hasType; exact .error hvt
+  closureOk := fun _ h => nomatch h
+  errorTyped := pr.errorTyped
 
 
 -- evalPrim results satisfy ValClosureOk.
@@ -548,7 +599,7 @@ def JoinWellTyped (jt : JoinTable) (Δ : JoinTyEnv) (Γ_join : TyEnv) (Λ : Loop
     Δ func = some ⟨paramTys, retTy⟩ →
     params.map (·.ty) = paramTys ∧
     (∀ p, p ∈ params → F p.binder = none) ∧
-    HasType (TyEnv.bindParams Γ_join params) Δ Λ F jbody retTy
+    ∀ E, HasType (TyEnv.bindParams Γ_join params) Δ Λ F E jbody retTy
 
 /-- JoinWellTyped holds vacuously for empty jt (any Δ). -/
 theorem JoinWellTyped.empty : JoinWellTyped JoinTable.empty Δ Γ Λ F :=
@@ -561,7 +612,7 @@ theorem JoinWellTyped.strengthen
     JoinWellTyped jt Δ Γ' Λ F := by
   intro func params jbody paramTys retTy hjt' hΔ
   obtain ⟨hmap, hfp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
-  exact ⟨hmap, hfp, hbody.strengthen (TyEnv.bindParams_mono hsub _)⟩
+  exact ⟨hmap, hfp, fun E => (hbody E).strengthen (TyEnv.bindParams_mono hsub _)⟩
 
 /-- JoinWellTyped weakening for Γ extension (let-binding sites).
     Sound for ANF programs where let-bound names are fresh in Γ.
@@ -607,7 +658,7 @@ theorem JoinWellTyped.strengthen_Λ
     JoinWellTyped jt Δ Γ Λ' F := by
   intro func params jbody paramTys retTy hjt' hΔ
   obtain ⟨hmap, hfp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
-  exact ⟨hmap, hfp, hbody.strengthen_Λ hsub⟩
+  exact ⟨hmap, hfp, fun E => (hbody E).strengthen_Λ hsub⟩
 
 /-- Combined Γ-bindParams and Λ-extend weakening for loop body sites.
     Sound for ANF programs where loop label is fresh in Λ and param binders are fresh in Γ. -/
@@ -624,7 +675,7 @@ theorem JoinWellTyped.weakenΓΛ_loop
     Uses Δ-monotonicity to lift old body typings to the extended Δ. -/
 theorem JoinWellTyped.extend_tail
     (hjwt : JoinWellTyped jt Δ Γ Λ F)
-    (hbody : HasType (TyEnv.bindParams Γ params) Δ Λ F fnBody τ)
+    (hbody : ∀ E, HasType (TyEnv.bindParams Γ params) Δ Λ F E fnBody τ)
     (hparams : ∀ p, p ∈ params → F p.binder = none)
     (hmap : params.map (·.ty) = paramTys) :
     JoinWellTyped (JoinTable.extend jt name ⟨params, fnBody⟩)
@@ -638,16 +689,16 @@ theorem JoinWellTyped.extend_tail
     simp [JoinTyEnv.extend] at hΔ'
     obtain ⟨rfl, rfl⟩ := hjt'
     obtain ⟨rfl, rfl⟩ := hΔ'
-    exact ⟨hmap, hparams, hbody.strengthen_Δ hmono⟩
+    exact ⟨hmap, hparams, fun E => (hbody E).strengthen_Δ hmono⟩
   · simp [JoinTable.extend, h] at hjt'
     simp [JoinTyEnv.extend, h] at hΔ'
     obtain ⟨hmap', hfp', hbody'⟩ := hjwt func params' jbody' paramTys' retTy' hjt' hΔ'
-    exact ⟨hmap', hfp', hbody'.strengthen_Δ hmono⟩
+    exact ⟨hmap', hfp', fun E => (hbody' E).strengthen_Δ hmono⟩
 
 /-- Extend JoinWellTyped with a new non-tail-join point. -/
 theorem JoinWellTyped.extend_nontail
     (hjwt : JoinWellTyped jt Δ Γ Λ F)
-    (hbody : HasType (TyEnv.bindParams Γ params) Δ Λ F fnBody joinTy)
+    (hbody : ∀ E, HasType (TyEnv.bindParams Γ params) Δ Λ F E fnBody joinTy)
     (hparams : ∀ p, p ∈ params → F p.binder = none)
     (hmap : params.map (·.ty) = paramTys) :
     JoinWellTyped (JoinTable.extend jt name ⟨params, fnBody⟩)
@@ -661,11 +712,11 @@ theorem JoinWellTyped.extend_nontail
     simp [JoinTyEnv.extend] at hΔ'
     obtain ⟨rfl, rfl⟩ := hjt'
     obtain ⟨rfl, rfl⟩ := hΔ'
-    exact ⟨hmap, hparams, hbody.strengthen_Δ hmono⟩
+    exact ⟨hmap, hparams, fun E => (hbody E).strengthen_Δ hmono⟩
   · simp [JoinTable.extend, h] at hjt'
     simp [JoinTyEnv.extend, h] at hΔ'
     obtain ⟨hmap', hfp', hbody'⟩ := hjwt func params' jbody' paramTys' retTy' hjt' hΔ'
-    exact ⟨hmap', hfp', hbody'.strengthen_Δ hmono⟩
+    exact ⟨hmap', hfp', fun E => (hbody' E).strengthen_Δ hmono⟩
 
 set_option maxHeartbeats 3200000 in
 set_option maxRecDepth 1024 in
@@ -674,7 +725,7 @@ mutual
 /-- Preservation for argument list evaluation.
     Returns value typing + per-value closure invariants. -/
 def preservationArgs
-    (htypes : HasTypeArgs Γ Δ Λ F es τs)
+    (htypes : HasTypeArgs Γ Δ Λ F E es τs)
     (hevals : EvalArgs ft env s jt lt nl es vs s' nl')
     (henv : EnvWellTyped env Γ)
     (hft : FnTableWellTyped ft F)
@@ -698,7 +749,7 @@ def preservationArgs
 /-- Preservation for argument list abort: the aborting arg's preservation
     result is weakened to the enclosing expression's type. -/
 def preservationArgsAbort
-    (htypes : HasTypeArgs Γ Δ Λ F es τs)
+    (htypes : HasTypeArgs Γ Δ Λ F E es τs)
     (habort : EvalArgsAbort ft env s jt lt nl es outcome s' nl')
     (henv : EnvWellTyped env Γ)
     (hft : FnTableWellTyped ft F)
@@ -706,7 +757,7 @@ def preservationArgsAbort
     (hdisj : FnEnvDisjoint env F)
     (hftc : FnTableComplete ft F)
     (hjwt : JoinWellTyped jt Δ Γ Λ F) :
-    PresResult outcome τ_result F Λ :=
+    PresResult outcome τ_result E F Λ :=
   match htypes, habort with
   | .cons htype _, .here heval hab =>
     (preservation htype heval henv hft hcinv hdisj hftc hjwt).weaken hab
@@ -717,7 +768,7 @@ def preservationArgsAbort
 
     Proof by structural recursion on the `Eval` derivation. -/
 def preservation
-    (htype : HasType Γ Δ Λ F e τ)
+    (htype : HasType Γ Δ Λ F E e τ)
     (heval : Eval ft env s jt lt nl e outcome s' nl')
     (henv : EnvWellTyped env Γ)
     (hft : FnTableWellTyped ft F)
@@ -725,7 +776,7 @@ def preservation
     (hdisj : FnEnvDisjoint env F)
     (hftc : FnTableComplete ft F)
     (hjwt : JoinWellTyped jt Δ Γ Λ F) :
-    PresResult outcome τ F Λ :=
+    PresResult outcome τ E F Λ :=
   match heval with
   -- ════════ Leaf cases ════════
   | .const => match htype with
@@ -769,7 +820,7 @@ def preservation
   | .returnAbort heval_e hab => match htype with
     | .returnSingle htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt).weaken hab
     | .returnOk htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt).weaken hab
-    | .returnErr htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt).weaken hab
+    | .returnErr _ htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt).weaken hab
   | .breakAbort heval_arg hab => match htype with
     | .break _ htype_arg => (preservation htype_arg heval_arg henv hft hcinv hdisj hftc hjwt).weaken hab
   | .objectAbort heval_self hab => match htype with
@@ -871,12 +922,12 @@ def preservation
   | .letfnTailJoin heval_body => match htype with
     | .letfnTailJoin hfparams htype_fn htype_body =>
       preservation htype_body heval_body henv hft hcinv hdisj hftc
-        (hjwt.extend_tail htype_fn hfparams rfl)
+        (hjwt.extend_tail (fun E' => htype_fn.strengthen_E E') hfparams rfl)
 
   | .letfnNontailJoin heval_body => match htype with
     | .letfnNontailJoin hfparams htype_fn htype_body =>
       preservation htype_body heval_body henv hft hcinv hdisj hftc
-        (hjwt.extend_nontail htype_fn hfparams rfl)
+        (hjwt.extend_nontail (fun E' => htype_fn.strengthen_E E') hfparams rfl)
 
   | .letrec hrecEnv_eq heval_body => match htype with
     | .letrec (bindings := bindings) hrecΓ_eq hFnames hFparams hbodies htype_body => by
@@ -997,7 +1048,7 @@ def preservation
               subst hptys; simp [List.length_map]; exact hτ)
             exact hptys ▸ this)
         (preservation hbodyTyped heval_body henv_body hft hcinv_body
-          (FnEnvDisjoint.bindParams hcapDisj _ _ hclosParams) hftc JoinWellTyped.empty).liftFromEmptyΛ
+          (FnEnvDisjoint.bindParams hcapDisj _ _ hclosParams) hftc JoinWellTyped.empty).liftFromEmptyΛ.liftFromNoneE
       | .not_closure hnotcl _ _ _ => absurd rfl (hnotcl _ _ _)
       | .recClosure hptys hrecEnv hbaseWT hbaseInv hbaseDisj hFname hclosParams hbodyTyped =>
         let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt
@@ -1019,7 +1070,7 @@ def preservation
               subst hptys; simp [List.length_map]; exact hτ)
             exact hptys ▸ this)
         (preservation hbodyTyped heval_body henv_body hft hcinv_body
-          (FnEnvDisjoint.bindParams (hrecEnv ▸ hbaseDisj.extend hFname) _ _ hclosParams) hftc JoinWellTyped.empty).liftFromEmptyΛ
+          (FnEnvDisjoint.bindParams (hrecEnv ▸ hbaseDisj.extend hFname) _ _ hclosParams) hftc JoinWellTyped.empty).liftFromEmptyΛ.liftFromNoneE
       | .recMutualClosure (bindings := bindings_cl)
           hptys_cl hrecEnv_cl hrecΓ_cl hidx hbinding hbaseWT_cl hbaseInv_cl hbaseDisj_cl
           hFnames_cl hparams_cl hbodies_cl => by
@@ -1030,7 +1081,7 @@ def preservation
         have apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt
         have hvts' := hptys_cl ▸ apr.hasTypes
         -- Build the three invariants
-        refine (preservation hbody_typed heval_body ?_ hft ?_ ?_ hftc JoinWellTyped.empty).liftFromEmptyΛ
+        refine (preservation hbody_typed heval_body ?_ hft ?_ ?_ hftc JoinWellTyped.empty).liftFromEmptyΛ.liftFromNoneE
         · -- EnvWellTyped (bindParams captured✝ params✝ argVals✝) (TyEnv.bindParams recΓ✝ params✝)
           rw [hrecEnv_cl]
           apply EnvWellTyped.bindParams_preserves _ _ _ hvts' hlen_clo
@@ -1078,7 +1129,7 @@ def preservation
             have := apr.closureOks i hv (by subst hptys; simp [List.length_map]; exact hτ)
             exact hptys ▸ this)
         (preservation hbodyTyped heval_body henv_body hft hcinv_body
-          (FnEnvDisjoint.bindParams FnEnvDisjoint.empty _ _ hclosParams) hftc JoinWellTyped.empty).liftFromEmptyΛ
+          (FnEnvDisjoint.bindParams FnEnvDisjoint.empty _ _ hclosParams) hftc JoinWellTyped.empty).liftFromEmptyΛ.liftFromNoneE
       | .not_closure _ _ hnotrfn _ => absurd rfl (hnotrfn _ _)
     | .applyClosure hΓ _ =>
       absurd (EnvWellTyped.lookup henv hΓ hfn) (fun h => ValueHasType.rawFn_not_func h)
@@ -1104,7 +1155,7 @@ def preservation
           have := apr.closureOks i hv (by subst hmap_eq; simp [List.length_map]; exact hτ)
           exact hmap_eq ▸ this)
       exact (preservation hbody_typed heval_body henv_body hft hcinv_body
-        (FnEnvDisjoint.bindParams FnEnvDisjoint.empty _ _ hftparams) hftc JoinWellTyped.empty).liftFromEmptyΛ
+        (FnEnvDisjoint.bindParams FnEnvDisjoint.empty _ _ hftparams) hftc JoinWellTyped.empty).liftFromEmptyΛ.liftFromNoneE
     | .applyClosure hΓ _ => by
       -- ft func = some (...) → F func = some (...) by FnTableComplete
       obtain ⟨retTy', hFsome⟩ := hftc _ _ _ hfnlookup
@@ -1122,7 +1173,8 @@ def preservation
         exact absurd hFsome (by rw [hdisj.2 _ _ _ henv_v]; exact fun h => nomatch h)
   | .applyJoin hjt heval_args hlen heval_body => match htype with
     | .applyJoin hΔ htype_args =>
-      let ⟨hmap, hfparams, hbody_typed⟩ := hjwt _ _ _ _ _ hjt hΔ
+      let ⟨hmap, hfparams, hbody_all_E⟩ := hjwt _ _ _ _ _ hjt hΔ
+      let hbody_typed := hbody_all_E E
       let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt
       let hvts := hmap ▸ apr.hasTypes
       let hlen_bp := by have := hvts.length_eq; simp [List.length_map] at this; omega
@@ -1212,40 +1264,56 @@ def preservation
         (fun i hv hτ => apr.closureOks i hv (by simp [List.length_map]; exact hτ))
       let pr := preservation htype_body heval_body henv' hft hcinv'
         (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop
-      let .error hvt := pr.hasType
-      .error' hvt
+      pr.errorWeaken
 
   -- ════════ Error handling ════════
   | .handleErrorToResultOk heval_obj => match htype with
     | .handleErrorToResult htype_obj =>
       let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt
       let hvt := pr.hasType.getVal
-      let hcl := pr.closureOk _ rfl
-      .val' (.constr (.cons hvt .nil)) (.constr (fun i hv hτ => by
-        have hi : i = 0 := by simp at hv; omega
-        subst hi; simp at hv hτ ⊢; exact hcl))
+      .val' (.errorValueResultOk hvt) sorry  -- ValClosureOk for errorValueResult type (secondary)
   | .handleErrorToResultErr heval_obj => match htype with
     | .handleErrorToResult htype_obj =>
       let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt
-      let .error _hvt := pr.hasType
-      sorry -- hvt : ValueHasType v errTy, but need ValueHasType v τ; requires errTy in Result type
+      let hvt := pr.errorTyped _ _ rfl rfl  -- ValueHasType v errTy (matching the handler's errTy)
+      .val' (.errorValueResultErr hvt) sorry  -- ValClosureOk for errorValueResult type (secondary)
   | .handleErrorJoinOk heval_obj => match htype with
-    | .handleErrorJoinapply htype_obj _ => preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt
-  | .handleErrorJoinErr heval_obj _ heval_body => sorry -- needs join env typing
+    | .handleErrorJoinapply htype_obj _ => (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt).liftValE
+  | .handleErrorJoinErr heval_obj hjt_lookup heval_body => match htype with
+    | .handleErrorJoinapply htype_obj hΔ =>
+      -- Get join body typing from JoinWellTyped invariant
+      let ⟨hmap, hfparams, hbody_all_E⟩ := hjwt _ _ _ _ _ hjt_lookup hΔ
+      let hbody_typed := hbody_all_E E
+      -- Get error value typing from preservation on obj
+      let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt
+      let hvt_err := pr.errorTyped _ _ rfl rfl  -- ValueHasType v errTy
+      -- Build ValueListHasType [v] [errTy] (single-element list)
+      let hvts : ValueListHasType [_] [_] := .cons hvt_err .nil
+      let hvts_mapped := hmap ▸ hvts
+      -- Build environments for join body evaluation
+      let hlen_bp' := by have := hvts_mapped.length_eq; simp [List.length_map, List.length] at this ⊢; omega
+      let henv_body := EnvWellTyped.bindParams_preserves henv _ _ hvts_mapped hlen_bp'
+      let hcinv_body := ClosureInvariant.bindParams hcinv _ _ hvts_mapped hlen_bp'
+        (fun i hv hτ => by
+          have hi : i = 0 := by simp at hv; omega
+          subst hi; simp at hv hτ ⊢
+          sorry) -- needs ValClosureOk for error value (secondary sorry)
+      -- Preservation on join body
+      preservation hbody_typed heval_body henv_body hft hcinv_body
+        (FnEnvDisjoint.bindParams hdisj _ _ hfparams) hftc hjwt.weakenΓ_bindParams
   | .handleErrorReturnErrOk heval_obj => match htype with
-    | .handleErrorReturnErr htype_obj => preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt
+    | .handleErrorReturnErr htype_obj => (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt).liftValE
   | .handleErrorReturnErrErr heval_obj => match htype with
     | .handleErrorReturnErr htype_obj =>
       let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt
-      let .error hvt := pr.hasType
-      .error' hvt
+      pr.errorWeaken
   | .handleErrorPropagate heval_obj hnotval hnoterr => match htype with
     | .handleErrorToResult htype_obj =>
-      (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt).weaken
-        (by simp [Outcome.isAbort])
+      (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt).weakenE
+        (by simp [Outcome.isAbort]) hnoterr
     | .handleErrorJoinapply htype_obj _ =>
-      (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt).weaken
-        (by simp [Outcome.isAbort])
+      (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt).weakenE
+        (by simp [Outcome.isAbort]) hnoterr
     | .handleErrorReturnErr htype_obj =>
       (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt).weaken
         (by simp [Outcome.isAbort])
@@ -1254,9 +1322,9 @@ def preservation
   | .returnSingle heval_e => match htype with
     | .returnSingle htype_e => preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt
   | .returnError heval_e => match htype with
-    | .returnErr htype_e =>
+    | .returnErr hE htype_e =>
       let pr := preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt
-      .error' pr.hasType.getVal
+      .errorKnown pr.hasType.getVal hE
   | .returnOk heval_e => match htype with
     | .returnOk htype_e => preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt
 
@@ -1264,7 +1332,7 @@ def preservation
     Handles all LoopReentry constructors, producing PresResult in the OUTER Λ. -/
 def preservationLoopReentry
     (htype_body : HasType (TyEnv.bindParams Γ params) Δ
-      (LoopTyEnv.extend Λ label ⟨params.map (·.ty), τ⟩) F body τ)
+      (LoopTyEnv.extend Λ label ⟨params.map (·.ty), τ⟩) F E body τ)
     (hreentry : LoopReentry ft env s jt lt nl params body newVals label loopOutcome sr nlr)
     (henv : EnvWellTyped env Γ)
     (hft : FnTableWellTyped ft F)
@@ -1276,7 +1344,7 @@ def preservationLoopReentry
     (hvts : ValueListHasType newVals (params.map (·.ty)))
     (hclos : ∀ i (hv : i < newVals.length) (hτ : i < (params.map (·.ty)).length),
       ValClosureOk (newVals[i]'hv) ((params.map (·.ty))[i]'hτ) F) :
-    PresResult loopOutcome τ F Λ := by
+    PresResult loopOutcome τ E F Λ := by
   match hreentry with
   | .val heval_body =>
     have hlen : params.length = newVals.length := by
@@ -1335,11 +1403,10 @@ def preservationLoopReentry
       (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
     let pr := preservation htype_body heval_body henv' hft hcinv'
       (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop
-    let .error hvt := pr.hasType
-    exact .error' hvt
+    exact pr.errorWeaken
 
 def preservation_val
-    (htype : HasType Γ Δ Λ F e τ)
+    (htype : HasType Γ Δ Λ F E e τ)
     (heval : Eval ft env s jt lt nl e (.val v) s' nl')
     (henv : EnvWellTyped env Γ)
     (hft : FnTableWellTyped ft F)

@@ -105,68 +105,70 @@ abbrev FnTyTable := Var → Option (List Mtype × Mtype)
 
 /-! ## Typing judgment
 
-`HasType Γ Δ Λ F e τ` means: in typing environment Γ, join env Δ,
-loop env Λ, function table F, expression e has type τ.
+`HasType Γ Δ Λ F E e τ` means: in typing environment Γ, join env Δ,
+loop env Λ, function table F, expected error type E, expression e has type τ.
 
-We also define `HasTypeOutcome` for outcomes.
+The error type parameter E tracks the type of error values produced by `returnErr`
+within an error-handling scope. Handlers (`handleError`) set E for their body,
+and `returnErr` constrains the error value to match E.
 -/
 
 mutual
 
 /-- Typing for argument lists. -/
 inductive HasTypeArgs :
-    TyEnv → JoinTyEnv → LoopTyEnv → FnTyTable →
+    TyEnv → JoinTyEnv → LoopTyEnv → FnTyTable → Option Mtype →
     List Expr → List Mtype → Prop where
   | nil :
-    HasTypeArgs Γ Δ Λ F [] []
+    HasTypeArgs Γ Δ Λ F E [] []
   | cons :
-    HasType Γ Δ Λ F e τ →
-    HasTypeArgs Γ Δ Λ F es τs →
-    HasTypeArgs Γ Δ Λ F (e :: es) (τ :: τs)
+    HasType Γ Δ Λ F E e τ →
+    HasTypeArgs Γ Δ Λ F E es τs →
+    HasTypeArgs Γ Δ Λ F E (e :: es) (τ :: τs)
 
 /-- Typing judgment for Mcore expressions. -/
 inductive HasType :
-    TyEnv → JoinTyEnv → LoopTyEnv → FnTyTable →
+    TyEnv → JoinTyEnv → LoopTyEnv → FnTyTable → Option Mtype →
     Expr → Mtype → Prop where
 
   -- ═══════════ Literals ═══════════
 
   | const :
-    HasType Γ Δ Λ F (.const c) (typeOfConst c)
+    HasType Γ Δ Λ F E (.const c) (typeOfConst c)
 
   | unit :
-    HasType Γ Δ Λ F .unit .unit
+    HasType Γ Δ Λ F E .unit .unit
 
   -- ═══════════ Variables ═══════════
 
   | var :
     Γ x = some τ →
-    HasType Γ Δ Λ F (.var x none) τ
+    HasType Γ Δ Λ F E (.var x none) τ
 
   | varPrim :
     Γ x = some τ →
-    HasType Γ Δ Λ F (.var x (some p)) τ
+    HasType Γ Δ Λ F E (.var x (some p)) τ
 
   -- ═══════════ Let binding ═══════════
 
   | «let» :
     F name = none →
-    HasType Γ Δ Λ F rhs τ₁ →
-    HasType (TyEnv.extend Γ name τ₁) Δ Λ F body τ₂ →
-    HasType Γ Δ Λ F (.let name rhs body) τ₂
+    HasType Γ Δ Λ F E rhs τ₁ →
+    HasType (TyEnv.extend Γ name τ₁) Δ Λ F E body τ₂ →
+    HasType Γ Δ Λ F E (.let name rhs body) τ₂
 
   -- ═══════════ Functions ═══════════
 
   | «function» :
     (∀ p, p ∈ params → F p.binder = none) →
-    HasType (TyEnv.bindParams Γ params) JoinTyEnv.empty LoopTyEnv.empty F fnBody retTy →
-    HasType Γ Δ Λ F (.function params fnBody false)
+    HasType (TyEnv.bindParams Γ params) JoinTyEnv.empty LoopTyEnv.empty F none fnBody retTy →
+    HasType Γ Δ Λ F E (.function params fnBody false)
       (.func (params.map (·.ty)) retTy)
 
   | rawFunction :
     (∀ p, p ∈ params → F p.binder = none) →
-    HasType (TyEnv.bindParams TyEnv.empty params) JoinTyEnv.empty LoopTyEnv.empty F fnBody retTy →
-    HasType Γ Δ Λ F (.function params fnBody true)
+    HasType (TyEnv.bindParams TyEnv.empty params) JoinTyEnv.empty LoopTyEnv.empty F none fnBody retTy →
+    HasType Γ Δ Λ F E (.function params fnBody true)
       (.rawFunc (params.map (·.ty)) retTy)
 
   -- ═══════════ Local function bindings ═══════════
@@ -174,29 +176,29 @@ inductive HasType :
   | letfnNonrec :
     F name = none →
     (∀ p, p ∈ params → F p.binder = none) →
-    HasType (TyEnv.bindParams Γ params) JoinTyEnv.empty LoopTyEnv.empty F fnBody retTy →
-    HasType (TyEnv.extend Γ name (.func (params.map (·.ty)) retTy)) Δ Λ F body τ →
-    HasType Γ Δ Λ F (.letfn name params fnBody body .nonRecursive) τ
+    HasType (TyEnv.bindParams Γ params) JoinTyEnv.empty LoopTyEnv.empty F none fnBody retTy →
+    HasType (TyEnv.extend Γ name (.func (params.map (·.ty)) retTy)) Δ Λ F E body τ →
+    HasType Γ Δ Λ F E (.letfn name params fnBody body .nonRecursive) τ
 
   | letfnRec :
     F name = none →
     (∀ p, p ∈ params → F p.binder = none) →
     HasType (TyEnv.bindParams (TyEnv.extend Γ name (.func (params.map (·.ty)) retTy)) params)
-      JoinTyEnv.empty LoopTyEnv.empty F fnBody retTy →
-    HasType (TyEnv.extend Γ name (.func (params.map (·.ty)) retTy)) Δ Λ F body τ →
-    HasType Γ Δ Λ F (.letfn name params fnBody body .recursive) τ
+      JoinTyEnv.empty LoopTyEnv.empty F none fnBody retTy →
+    HasType (TyEnv.extend Γ name (.func (params.map (·.ty)) retTy)) Δ Λ F E body τ →
+    HasType Γ Δ Λ F E (.letfn name params fnBody body .recursive) τ
 
   | letfnTailJoin :
     (∀ p, p ∈ params → F p.binder = none) →
-    HasType (TyEnv.bindParams Γ params) Δ Λ F fnBody τ →
-    HasType Γ (JoinTyEnv.extend Δ name ⟨params.map (·.ty), τ⟩) Λ F body τ →
-    HasType Γ Δ Λ F (.letfn name params fnBody body .tailJoin) τ
+    HasType (TyEnv.bindParams Γ params) Δ Λ F E fnBody τ →
+    HasType Γ (JoinTyEnv.extend Δ name ⟨params.map (·.ty), τ⟩) Λ F E body τ →
+    HasType Γ Δ Λ F E (.letfn name params fnBody body .tailJoin) τ
 
   | letfnNontailJoin :
     (∀ p, p ∈ params → F p.binder = none) →
-    HasType (TyEnv.bindParams Γ params) Δ Λ F fnBody joinTy →
-    HasType Γ (JoinTyEnv.extend Δ name ⟨params.map (·.ty), joinTy⟩) Λ F body τ →
-    HasType Γ Δ Λ F (.letfn name params fnBody body .nontailJoin) τ
+    HasType (TyEnv.bindParams Γ params) Δ Λ F E fnBody joinTy →
+    HasType Γ (JoinTyEnv.extend Δ name ⟨params.map (·.ty), joinTy⟩) Λ F E body τ →
+    HasType Γ Δ Λ F E (.letfn name params fnBody body .nontailJoin) τ
 
   -- ═══════════ Mutual recursion ═══════════
 
@@ -207,198 +209,202 @@ inductive HasType :
     (∀ j (hj : j < bindings.length) p, p ∈ (bindings[j]'hj).2.1 → F p.binder = none) →
     (∀ i (h : i < bindings.length),
       HasType (TyEnv.bindParams recΓ (bindings[i].2.1))
-        JoinTyEnv.empty LoopTyEnv.empty F (bindings[i].2.2) retTy) →
-    HasType recΓ Δ Λ F body τ →
-    HasType Γ Δ Λ F (.letrec bindings body) τ
+        JoinTyEnv.empty LoopTyEnv.empty F none (bindings[i].2.2) retTy) →
+    HasType recΓ Δ Λ F E body τ →
+    HasType Γ Δ Λ F E (.letrec bindings body) τ
 
   -- ═══════════ Application ═══════════
 
   | applyClosure :
     Γ func = some (.func paramTys retTy) →
-    HasTypeArgs Γ Δ Λ F argExprs paramTys →
-    HasType Γ Δ Λ F (.apply func argExprs (.normal (.func paramTys retTy))) retTy
+    HasTypeArgs Γ Δ Λ F E argExprs paramTys →
+    HasType Γ Δ Λ F E (.apply func argExprs (.normal (.func paramTys retTy))) retTy
 
   | applyRawFn :
     Γ func = some (.rawFunc paramTys retTy) →
-    HasTypeArgs Γ Δ Λ F argExprs paramTys →
-    HasType Γ Δ Λ F (.apply func argExprs (.normal (.rawFunc paramTys retTy))) retTy
+    HasTypeArgs Γ Δ Λ F E argExprs paramTys →
+    HasType Γ Δ Λ F E (.apply func argExprs (.normal (.rawFunc paramTys retTy))) retTy
 
   | applyTopFn :
     F func = some (paramTys, retTy) →
-    HasTypeArgs Γ Δ Λ F argExprs paramTys →
-    HasType Γ Δ Λ F (.apply func argExprs (.normal (.func paramTys retTy))) retTy
+    HasTypeArgs Γ Δ Λ F E argExprs paramTys →
+    HasType Γ Δ Λ F E (.apply func argExprs (.normal (.func paramTys retTy))) retTy
 
   | applyJoin :
     Δ func = some ⟨paramTys, retTy⟩ →
-    HasTypeArgs Γ Δ Λ F argExprs paramTys →
-    HasType Γ Δ Λ F (.apply func argExprs .join) retTy
+    HasTypeArgs Γ Δ Λ F E argExprs paramTys →
+    HasType Γ Δ Λ F E (.apply func argExprs .join) retTy
 
   -- ═══════════ Primitives ═══════════
 
   | prim :
-    HasTypeArgs Γ Δ Λ F argExprs argTys →
+    HasTypeArgs Γ Δ Λ F E argExprs argTys →
     typeOfPrim op argTys = some τ →
-    HasType Γ Δ Λ F (.prim op argExprs) τ
+    HasType Γ Δ Λ F E (.prim op argExprs) τ
 
   -- ═══════════ Data construction ═══════════
 
   | constr :
-    HasTypeArgs Γ Δ Λ F argExprs argTys →
-    HasType Γ Δ Λ F (.constr tag argExprs) (.constr tid argTys)
+    HasTypeArgs Γ Δ Λ F E argExprs argTys →
+    HasType Γ Δ Λ F E (.constr tag argExprs) (.constr tid argTys)
 
   | tuple :
-    HasTypeArgs Γ Δ Λ F exprs τs →
-    HasType Γ Δ Λ F (.tuple exprs) (.tuple τs)
+    HasTypeArgs Γ Δ Λ F E exprs τs →
+    HasType Γ Δ Λ F E (.tuple exprs) (.tuple τs)
 
   | record :
-    HasTypeArgs Γ Δ Λ F (fieldExprs.map fun (_, _, _, e) => e) fieldTys →
-    HasType Γ Δ Λ F (.record fieldExprs) (.constr tid fieldTys)
+    HasTypeArgs Γ Δ Λ F E (fieldExprs.map fun (_, _, _, e) => e) fieldTys →
+    HasType Γ Δ Λ F E (.record fieldExprs) (.constr tid fieldTys)
 
   | recordUpdate :
-    HasType Γ Δ Λ F rec_ (.constr tid ats) →
-    HasTypeArgs Γ Δ Λ F (updFields.map fun (_, _, _, e) => e) _ →
-    HasType Γ Δ Λ F (.recordUpdate rec_ updFields fieldsNum) (.constr tid ats)
+    HasType Γ Δ Λ F E rec_ (.constr tid ats) →
+    HasTypeArgs Γ Δ Λ F E (updFields.map fun (_, _, _, e) => e) _ →
+    HasType Γ Δ Λ F E (.recordUpdate rec_ updFields fieldsNum) (.constr tid ats)
 
   | array :
-    HasTypeArgs Γ Δ Λ F exprs (List.replicate exprs.length elemTy) →
-    HasType Γ Δ Λ F (.array exprs) (.fixedarray elemTy)
+    HasTypeArgs Γ Δ Λ F E exprs (List.replicate exprs.length elemTy) →
+    HasType Γ Δ Λ F E (.array exprs) (.fixedarray elemTy)
 
   -- ═══════════ Field access ═══════════
 
   | fieldTuple :
-    HasType Γ Δ Λ F rec_ (.tuple τs) →
+    HasType Γ Δ Λ F E rec_ (.tuple τs) →
     τs[pos]? = some τ →
-    HasType Γ Δ Λ F (.field rec_ acc pos) τ
+    HasType Γ Δ Λ F E (.field rec_ acc pos) τ
 
   /-- Field access from a constr or record (both have type .constr tid argTypes).
       argTypes constrains fieldTy via positional lookup. -/
   | fieldHeap :
-    HasType Γ Δ Λ F rec_ (.constr tid argTypes) →
+    HasType Γ Δ Λ F E rec_ (.constr tid argTypes) →
     argTypes[pos]? = some fieldTy →
-    HasType Γ Δ Λ F (.field rec_ acc pos) fieldTy
+    HasType Γ Δ Λ F E (.field rec_ acc pos) fieldTy
 
   -- ═══════════ Mutation ═══════════
 
   | mutate :
-    HasType Γ Δ Λ F rec_ (.constr tid ats) →
-    HasType Γ Δ Λ F fld fieldTy →
-    HasType Γ Δ Λ F (.mutate rec_ label fld pos) .unit
+    HasType Γ Δ Λ F E rec_ (.constr tid ats) →
+    HasType Γ Δ Λ F E fld fieldTy →
+    HasType Γ Δ Λ F E (.mutate rec_ label fld pos) .unit
 
   | assign :
     Γ x = some τ →
-    HasType Γ Δ Λ F e τ →
-    HasType Γ Δ Λ F (.assign x e) .unit
+    HasType Γ Δ Λ F E e τ →
+    HasType Γ Δ Λ F E (.assign x e) .unit
 
   -- ═══════════ Sequencing ═══════════
 
   | seq :
-    HasTypeArgs Γ Δ Λ F exprs _ →
-    HasType Γ Δ Λ F last τ →
-    HasType Γ Δ Λ F (.seq exprs last) τ
+    HasTypeArgs Γ Δ Λ F E exprs _ →
+    HasType Γ Δ Λ F E last τ →
+    HasType Γ Δ Λ F E (.seq exprs last) τ
 
   -- ═══════════ Conditionals ═══════════
 
   | ifSome :
-    HasType Γ Δ Λ F condE .bool →
-    HasType Γ Δ Λ F ifso τ →
-    HasType Γ Δ Λ F ifnot τ →
-    HasType Γ Δ Λ F (.if condE ifso (some ifnot)) τ
+    HasType Γ Δ Λ F E condE .bool →
+    HasType Γ Δ Λ F E ifso τ →
+    HasType Γ Δ Λ F E ifnot τ →
+    HasType Γ Δ Λ F E (.if condE ifso (some ifnot)) τ
 
   | ifNone :
-    HasType Γ Δ Λ F condE .bool →
-    HasType Γ Δ Λ F ifso .unit →
-    HasType Γ Δ Λ F (.if condE ifso none) .unit
+    HasType Γ Δ Λ F E condE .bool →
+    HasType Γ Δ Λ F E ifso .unit →
+    HasType Γ Δ Λ F E (.if condE ifso none) .unit
 
   -- ═══════════ Pattern matching ═══════════
 
   /-- Switch on constructors: all branches (and default) must have type τ. -/
   | switchConstr :
-    HasType Γ Δ Λ F obj (.constr tid ats) →
+    HasType Γ Δ Λ F E obj (.constr tid ats) →
     (∀ tag binder branch, findConstrCase cases tag = some (binder, branch) →
       HasType (match binder with
         | some x => TyEnv.extend Γ x (.constr tid ats)
-        | none => Γ) Δ Λ F branch τ) →
-    (∀ d, dflt = some d → HasType Γ Δ Λ F d τ) →
-    HasType Γ Δ Λ F (.switchConstr obj cases dflt) τ
+        | none => Γ) Δ Λ F E branch τ) →
+    (∀ d, dflt = some d → HasType Γ Δ Λ F E d τ) →
+    HasType Γ Δ Λ F E (.switchConstr obj cases dflt) τ
 
   | switchConstant :
-    HasType Γ Δ Λ F obj objTy →
+    HasType Γ Δ Λ F E obj objTy →
     (∀ i (h : i < cases.length),
-      HasType Γ Δ Λ F (cases[i]).2 τ) →
-    HasType Γ Δ Λ F dflt τ →
-    HasType Γ Δ Λ F (.switchConstant obj cases dflt) τ
+      HasType Γ Δ Λ F E (cases[i]).2 τ) →
+    HasType Γ Δ Λ F E dflt τ →
+    HasType Γ Δ Λ F E (.switchConstant obj cases dflt) τ
 
   -- ═══════════ Loops ═══════════
 
   | loop :
     (∀ p, p ∈ params → F p.binder = none) →
-    HasTypeArgs Γ Δ Λ F argExprs (params.map (·.ty)) →
+    HasTypeArgs Γ Δ Λ F E argExprs (params.map (·.ty)) →
     HasType (TyEnv.bindParams Γ params) Δ
-      (LoopTyEnv.extend Λ label ⟨params.map (·.ty), τ⟩) F body τ →
-    HasType Γ Δ Λ F (.loop params body argExprs label) τ
+      (LoopTyEnv.extend Λ label ⟨params.map (·.ty), τ⟩) F E body τ →
+    HasType Γ Δ Λ F E (.loop params body argExprs label) τ
 
   | «break» :
     Λ label = some ⟨_, τ⟩ →
-    HasType Γ Δ Λ F arg τ →
-    HasType Γ Δ Λ F (.break (some arg) label) τ'
+    HasType Γ Δ Λ F E arg τ →
+    HasType Γ Δ Λ F E (.break (some arg) label) τ'
 
   | breakNone :
     Λ label = some ⟨_, .unit⟩ →
-    HasType Γ Δ Λ F (.break none label) τ'
+    HasType Γ Δ Λ F E (.break none label) τ'
 
   | «continue» :
     Λ label = some ⟨paramTys, _⟩ →
-    HasTypeArgs Γ Δ Λ F argExprs paramTys →
-    HasType Γ Δ Λ F (.continue argExprs label) τ'
+    HasTypeArgs Γ Δ Λ F E argExprs paramTys →
+    HasType Γ Δ Λ F E (.continue argExprs label) τ'
 
   -- ═══════════ Logical operators ═══════════
 
   | and :
-    HasType Γ Δ Λ F lhs .bool →
-    HasType Γ Δ Λ F rhs .bool →
-    HasType Γ Δ Λ F (.and lhs rhs) .bool
+    HasType Γ Δ Λ F E lhs .bool →
+    HasType Γ Δ Λ F E rhs .bool →
+    HasType Γ Δ Λ F E (.and lhs rhs) .bool
 
   | or :
-    HasType Γ Δ Λ F lhs .bool →
-    HasType Γ Δ Λ F rhs .bool →
-    HasType Γ Δ Λ F (.or lhs rhs) .bool
+    HasType Γ Δ Λ F E lhs .bool →
+    HasType Γ Δ Λ F E rhs .bool →
+    HasType Γ Δ Λ F E (.or lhs rhs) .bool
 
   -- ═══════════ Error handling ═══════════
 
+  /-- handleError toResult: obj is typed with error type errTy. -/
   | handleErrorToResult :
-    HasType Γ Δ Λ F obj τ →
-    HasType Γ Δ Λ F (.handleError obj .toResult) (.constr resultTid [τ])
+    HasType Γ Δ Λ F (some errTy) obj τ →
+    HasType Γ Δ Λ F E (.handleError obj .toResult) (.errorValueResult τ errTy resultTid)
 
+  /-- handleError joinapply: error type of obj must match join parameter type,
+      and join return type must match the overall expression type. -/
   | handleErrorJoinapply :
-    HasType Γ Δ Λ F obj τ →
-    Δ target = some ⟨[errTy], _⟩ →
-    HasType Γ Δ Λ F (.handleError obj (.joinapply target)) τ
+    HasType Γ Δ Λ F (some errTy) obj τ →
+    Δ target = some ⟨[errTy], τ⟩ →
+    HasType Γ Δ Λ F E (.handleError obj (.joinapply target)) τ
 
   | handleErrorReturnErr :
-    HasType Γ Δ Λ F obj τ →
-    HasType Γ Δ Λ F (.handleError obj (.returnErr okTy)) τ
+    HasType Γ Δ Λ F (some errTy) obj τ →
+    HasType Γ Δ Λ F (some errTy) (.handleError obj (.returnErr okTy)) τ
 
   -- ═══════════ Return ═══════════
 
   | returnSingle :
-    HasType Γ Δ Λ F e τ →
-    HasType Γ Δ Λ F (.return e .singleValue) τ
+    HasType Γ Δ Λ F E e τ →
+    HasType Γ Δ Λ F E (.return e .singleValue) τ
 
   /-- return Ok: sub-expression value is returned, so its type must match. -/
   | returnOk :
-    HasType Γ Δ Λ F e τ →
-    HasType Γ Δ Λ F (.return e (.errorResult false τ)) τ
+    HasType Γ Δ Λ F E e τ →
+    HasType Γ Δ Λ F E (.return e (.errorResult false τ)) τ
 
-  /-- return Error: raises an error, so the return type can be anything. -/
+  /-- return Error: raises an error; E constrains the error type. -/
   | returnErr :
-    HasType Γ Δ Λ F e errTy →
-    HasType Γ Δ Λ F (.return e (.errorResult true retTy)) retTy
+    E = some errTy →
+    HasType Γ Δ Λ F E e errTy →
+    HasType Γ Δ Λ F E (.return e (.errorResult true retTy)) retTy
 
   -- ═══════════ Objects ═══════════
 
   | object :
-    HasType Γ Δ Λ F self τ →
-    HasType Γ Δ Λ F (.object self) τ
+    HasType Γ Δ Λ F E self τ →
+    HasType Γ Δ Λ F E (.object self) τ
 
 end -- mutual
 
@@ -434,6 +440,12 @@ inductive ValueHasType : Value → Mtype → Prop where
     ValueHasType (.loc l) (.constr tid ats)
   | locArray :
     ValueHasType (.loc l) (.fixedarray elemTy)
+  | errorValueResultOk :
+    ValueHasType v okTy →
+    ValueHasType (.constr 0 [v]) (.errorValueResult okTy errTy tid)
+  | errorValueResultErr :
+    ValueHasType v errTy →
+    ValueHasType (.constr 1 [v]) (.errorValueResult okTy errTy tid)
 
 /-- Pointwise value typing on lists. -/
 inductive ValueListHasType : List Value → List Mtype → Prop where
@@ -479,13 +491,13 @@ inductive ValClosureOk : Value → Mtype → FnTyTable → Prop where
     (hcapDisj : FnEnvDisjoint captured F) →
     (hparams : ∀ p, p ∈ params → F p.binder = none) →
     (hbody : HasType (TyEnv.bindParams Γcap params)
-        JoinTyEnv.empty LoopTyEnv.empty F body retTy) →
+        JoinTyEnv.empty LoopTyEnv.empty F none body retTy) →
     ValClosureOk (.closure captured params body) (.func paramTys retTy) F
   | rawFn :
     (hptys : paramTys = params.map (·.ty)) →
     (hparams : ∀ p, p ∈ params → F p.binder = none) →
     (hbody : HasType (TyEnv.bindParams TyEnv.empty params)
-        JoinTyEnv.empty LoopTyEnv.empty F body retTy) →
+        JoinTyEnv.empty LoopTyEnv.empty F none body retTy) →
     ValClosureOk (.rawFn params body) (.rawFunc paramTys retTy) F
   | recClosure :
     (hptys : paramTys = params.map (·.ty)) →
@@ -496,7 +508,7 @@ inductive ValClosureOk : Value → Mtype → FnTyTable → Prop where
     (hFname : F name = none) →
     (hparams : ∀ p, p ∈ params → F p.binder = none) →
     (hbody : HasType (TyEnv.bindParams (TyEnv.extend Γbase name (.func paramTys retTy)) params)
-        JoinTyEnv.empty LoopTyEnv.empty F body retTy) →
+        JoinTyEnv.empty LoopTyEnv.empty F none body retTy) →
     ValClosureOk (.closure recEnv params body) (.func paramTys retTy) F
   | recMutualClosure
     {bindings : List (Var × List Param × Expr)} :
@@ -515,7 +527,7 @@ inductive ValClosureOk : Value → Mtype → FnTyTable → Prop where
     (hparams : ∀ j (hj : j < bindings.length) p, p ∈ (bindings[j]'hj).2.1 → F p.binder = none) →
     (hbodies : ∀ j (hj : j < bindings.length),
       HasType (TyEnv.bindParams recΓ ((bindings[j]'(by omega)).2.1))
-        JoinTyEnv.empty LoopTyEnv.empty F ((bindings[j]'(by omega)).2.2) retTy) →
+        JoinTyEnv.empty LoopTyEnv.empty F none ((bindings[j]'(by omega)).2.2) retTy) →
     ValClosureOk (.closure recEnv params_i body_i) (.func paramTys_i retTy) F
 
 /-- Outcome typing. Break outcomes carry value typing from the Λ lookup. -/
