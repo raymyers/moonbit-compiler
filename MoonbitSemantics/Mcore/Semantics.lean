@@ -512,17 +512,13 @@ inductive Eval (fnTable : FnTable) :
       (LoopTable.extend lt label ⟨params, body⟩) nl₁ body (.break none label) sr nlr →
     Eval fnTable env s jt lt nl (.loop params body argExprs label) (.val .unit) sr nlr
 
-  /-- Loop body continues → re-enter loop with new values. -/
+  /-- Loop body continues → re-enter loop via LoopReentry (catches breaks properly). -/
   | loopContinue :
     EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
     Eval fnTable (Env.bindParams env params argVals) s₁ jt
       (LoopTable.extend lt label ⟨params, body⟩) nl₁ body (.continue newVals label) s₂ nl₂ →
     params.length = newVals.length →
-    -- Re-enter: evaluate body again with new param values
-    Eval fnTable (Env.bindParams env params newVals) s₂ jt
-      (LoopTable.extend lt label ⟨params, body⟩) nl₂ body loopOutcome sr nlr →
-    -- The re-entered body must itself resolve (val, or break — not continue again in this rule)
-    -- For multiple continues, this rule chains: the inner Eval can itself be loopContinue.
+    LoopReentry fnTable env s₂ jt lt nl₂ params body newVals label loopOutcome sr nlr →
     Eval fnTable env s jt lt nl (.loop params body argExprs label) loopOutcome sr nlr
 
   /-- Loop body returns/errors → propagate past loop. -/
@@ -672,6 +668,38 @@ inductive Eval (fnTable : FnTable) :
     Eval fnTable env s jt lt nl self outcome s₁ nl₁ →
     outcome.isAbort →
     Eval fnTable env s jt lt nl (.object self) outcome s₁ nl₁
+
+/-- Loop re-entry: evaluates body with new args, catching breaks/continues properly. -/
+inductive LoopReentry (fnTable : FnTable) :
+    Env → Store → JoinTable → LoopTable → Loc →
+    List Param → Expr → List Value → LoopLabel →
+    Outcome → Store → Loc → Prop where
+  | val :
+    Eval fnTable (Env.bindParams env params newVals) s jt
+      (LoopTable.extend lt label ⟨params, body⟩) nl body (.val v) sr nlr →
+    LoopReentry fnTable env s jt lt nl params body newVals label (.val v) sr nlr
+  | breakSome :
+    Eval fnTable (Env.bindParams env params newVals) s jt
+      (LoopTable.extend lt label ⟨params, body⟩) nl body (.break (some v) label) sr nlr →
+    LoopReentry fnTable env s jt lt nl params body newVals label (.val v) sr nlr
+  | breakNone :
+    Eval fnTable (Env.bindParams env params newVals) s jt
+      (LoopTable.extend lt label ⟨params, body⟩) nl body (.break none label) sr nlr →
+    LoopReentry fnTable env s jt lt nl params body newVals label (.val .unit) sr nlr
+  | «continue» :
+    Eval fnTable (Env.bindParams env params newVals) s jt
+      (LoopTable.extend lt label ⟨params, body⟩) nl body (.continue nextVals label) s₂ nl₂ →
+    nextVals.length = params.length →
+    LoopReentry fnTable env s₂ jt lt nl₂ params body nextVals label loopOutcome sr nlr →
+    LoopReentry fnTable env s jt lt nl params body newVals label loopOutcome sr nlr
+  | «return» :
+    Eval fnTable (Env.bindParams env params newVals) s jt
+      (LoopTable.extend lt label ⟨params, body⟩) nl body (.return v) sr nlr →
+    LoopReentry fnTable env s jt lt nl params body newVals label (.return v) sr nlr
+  | error :
+    Eval fnTable (Env.bindParams env params newVals) s jt
+      (LoopTable.extend lt label ⟨params, body⟩) nl body (.error v) sr nlr →
+    LoopReentry fnTable env s jt lt nl params body newVals label (.error v) sr nlr
 
 end -- mutual
 

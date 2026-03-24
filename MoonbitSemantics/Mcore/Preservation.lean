@@ -1156,7 +1156,23 @@ def preservation
           simp [LoopTyEnv.extend] at hΛ
           obtain ⟨_, rfl⟩ := hΛ
           exact PresResult.val' .unit (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
-  | .loopContinue _ _ _ heval_reentry => sorry -- needs: Λ lift for re-entry (semantic issue with uncaught breaks)
+  | .loopContinue heval_args heval_body hlen_cont heval_reentry => match htype with
+    | .loop hloopParams htype_args htype_body =>
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt
+      let hlen := by
+        have := apr.hasTypes.length_eq; simp [List.length_map] at this; omega
+      let henv' := EnvWellTyped.bindParams_preserves henv _ _ apr.hasTypes hlen
+      let hcinv' := ClosureInvariant.bindParams hcinv _ _ apr.hasTypes hlen
+        (fun i hv hτ => apr.closureOks i hv (by simp [List.length_map]; exact hτ))
+      let pr := preservation htype_body heval_body henv' hft hcinv'
+        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop
+      by
+        cases pr.hasType with
+        | «continue» hΛ hvts_next hclos_next =>
+          simp [LoopTyEnv.extend] at hΛ
+          obtain ⟨rfl, rfl⟩ := hΛ
+          exact preservationLoopReentry htype_body heval_reentry henv hft hcinv hdisj hftc hjwt
+            hloopParams hvts_next hclos_next
   | .loopReturn heval_args heval_body => match htype with
     | .loop _ htype_args htype_body => .return'
   | .loopError heval_args heval_body => match htype with
@@ -1194,6 +1210,75 @@ def preservation
     | .returnErr _ => .error'
   | .returnOk heval_e => match htype with
     | .returnOk htype_e => preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt
+
+/-- Preservation for loop re-entry.
+    Handles all LoopReentry constructors, producing PresResult in the OUTER Λ. -/
+def preservationLoopReentry
+    (htype_body : HasType (TyEnv.bindParams Γ params) Δ
+      (LoopTyEnv.extend Λ label ⟨params.map (·.ty), τ⟩) F body τ)
+    (hreentry : LoopReentry ft env s jt lt nl params body newVals label loopOutcome sr nlr)
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hloopParams : ∀ p, p ∈ params → F p.binder = none)
+    (hvts : ValueListHasType newVals (params.map (·.ty)))
+    (hclos : ∀ i (hv : i < newVals.length) (hτ : i < (params.map (·.ty)).length),
+      ValClosureOk (newVals[i]'hv) ((params.map (·.ty))[i]'hτ) F) :
+    PresResult loopOutcome τ F Λ := by
+  match hreentry with
+  | .val heval_body =>
+    have hlen : params.length = newVals.length := by
+      have := hvts.length_eq; simp [List.length_map] at this; omega
+    let henv' := EnvWellTyped.bindParams_preserves henv _ _ hvts hlen
+    let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
+      (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
+    exact (preservation htype_body heval_body henv' hft hcinv'
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop).liftVal
+  | .breakSome heval_body =>
+    have hlen : params.length = newVals.length := by
+      have := hvts.length_eq; simp [List.length_map] at this; omega
+    let henv' := EnvWellTyped.bindParams_preserves henv _ _ hvts hlen
+    let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
+      (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
+    let pr := preservation htype_body heval_body henv' hft hcinv'
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop
+    cases pr.hasType with
+    | breakSome hΛ hvt hcl =>
+      simp [LoopTyEnv.extend] at hΛ
+      obtain ⟨_, rfl⟩ := hΛ
+      exact PresResult.val' hvt hcl
+  | .breakNone heval_body =>
+    have hlen : params.length = newVals.length := by
+      have := hvts.length_eq; simp [List.length_map] at this; omega
+    let henv' := EnvWellTyped.bindParams_preserves henv _ _ hvts hlen
+    let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
+      (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
+    let pr := preservation htype_body heval_body henv' hft hcinv'
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop
+    cases pr.hasType with
+    | breakNone hΛ =>
+      simp [LoopTyEnv.extend] at hΛ
+      obtain ⟨_, rfl⟩ := hΛ
+      exact PresResult.val' .unit (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
+  | .continue heval_body hlen_next hreentry_inner =>
+    have hlen : params.length = newVals.length := by
+      have := hvts.length_eq; simp [List.length_map] at this; omega
+    let henv' := EnvWellTyped.bindParams_preserves henv _ _ hvts hlen
+    let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
+      (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
+    let pr := preservation htype_body heval_body henv' hft hcinv'
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop
+    cases pr.hasType with
+    | «continue» hΛ hvts_next hclos_next =>
+      simp [LoopTyEnv.extend] at hΛ
+      obtain ⟨rfl, rfl⟩ := hΛ
+      exact preservationLoopReentry htype_body hreentry_inner henv hft hcinv hdisj hftc hjwt
+        hloopParams hvts_next hclos_next
+  | .return heval_body => exact .return'
+  | .error heval_body => exact .error'
 
 def preservation_val
     (htype : HasType Γ Δ Λ F e τ)
