@@ -53,7 +53,7 @@ inductive Mtype where
   | tuple (tys : List Mtype)
   | fixedarray (elem : Mtype)
   -- Named types
-  | constr (id : TypeId)
+  | constr (id : TypeId) (argTypes : List Mtype)
   | trait (id : TypeId)
   | any (id : TypeId)
   -- Special

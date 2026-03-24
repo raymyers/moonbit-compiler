@@ -94,7 +94,7 @@ def lowerType : Mcore.Mtype → Ltype
   | .rawFunc _ _ => .refFunc
   | .tuple _ => .refAny     -- tuples become heap refs
   | .fixedarray _ => .refAny
-  | .constr id => .ref id
+  | .constr id _ => .ref id
   | .trait id => .ref id
   | .any id => .refAny
   | .optimizedOption _ => .refAny

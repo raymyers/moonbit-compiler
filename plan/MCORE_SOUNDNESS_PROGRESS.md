@@ -31,11 +31,12 @@ orFalse, seq, breakSome, breakNone, continue
 **Data (8):** tuple (via preservationArgs), constr, record, array, recordUpdate,
 assign, mutate, object
 
-**Field access (1):** fieldTuple (via ValueListHasType.getAt?)
+**Field access (2):** fieldTuple (via ValueListHasType.getAt?),
+fieldConstr (via enriched Mtype.constr + ValueListHasType + constr_getAt?)
 
 **Loops (3):** loopVal, loopReturn, loopError (via bindParams_preserves + IH)
 
-**Error handling (6):** handleErrorToResultOk/Err, handleErrorJoinOk,
+**Error handling (5):** handleErrorToResultOk, handleErrorJoinOk,
 handleErrorReturnErrOk/Err, handleErrorPropagate
 
 **Application (1):** applyClosure body (via ClosureInvariant extraction)
@@ -71,6 +72,19 @@ handleErrorReturnErrOk/Err, handleErrorPropagate
 - `evalPrim_non_identity_constOrUnit`: non-identity evalPrim returns const or unit
 
 ## Remaining sorry: 9 total (7 Preservation + 2 FreeVars)
+
+### Recent: fieldConstr sorry closed (Barrier 5 partially resolved)
+
+Closed the `fieldConstr × fieldHeap` sorry by:
+1. Enriching `Mtype.constr` to carry `argTypes : List Mtype` (field types)
+2. Adding `ValueListHasType args argTypes` to `ValueHasType.constr`
+3. Adding `argTypes[pos]? = some fieldTy` to `HasType.fieldHeap`
+4. Adding `ValClosureOk.constr` constructor with per-field invariants
+5. Adding `ValClosureOk.constr_getAt?` extraction lemma
+
+Trade-off: `handleErrorToResultErr` now has sorry (error value type unknown).
+The `fieldRecord × fieldHeap` sorry remains (needs store typing).
+Net: 1 fieldHeap sorry closed, 1 handleError sorry added — different concerns.
 
 Note: FreeVars.lean sorry are termination proofs (`decreasing_by all_goals sorry`)
 — a Lean 4 limitation on ∀-quantified sub-derivations in structural recursion.
@@ -147,13 +161,16 @@ break value's type. Strengthen to `BreakValueTyped` invariant.
 
 **Estimated effort:** ~60 lines.
 
-### Barrier 5: Field TypeDefs (2 sorry)
+### Barrier 5: Field TypeDefs (1 sorry remaining)
 
-**Where:** fieldConstr×fieldHeap (1), fieldRecord×fieldHeap (1)
+**Closed:** fieldConstr×fieldHeap — via `Mtype.constr` carrying `argTypes`,
+`ValueHasType.constr` carrying `ValueListHasType`, and `fieldHeap` carrying
+`argTypes[pos]? = some fieldTy`.
 
-**What's needed:** Same as before — constrain `fieldTy` via `TypeDefs`.
+**Remaining:** fieldRecord×fieldHeap (1) — needs store typing invariant
+to relate heap record fields to `argTypes`.
 
-**Estimated effort:** ~50 lines.
+**Estimated effort:** ~50 lines (store typing invariant).
 
 ### ~~Barrier 6: evalPrim~~ — CLOSED (P6 + PrimTyping)
 

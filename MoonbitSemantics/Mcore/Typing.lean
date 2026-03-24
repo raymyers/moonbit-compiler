@@ -244,7 +244,7 @@ inductive HasType :
 
   | constr :
     HasTypeArgs Γ Δ Λ F argExprs argTys →
-    HasType Γ Δ Λ F (.constr tag argExprs) (.constr tid)
+    HasType Γ Δ Λ F (.constr tag argExprs) (.constr tid argTys)
 
   | tuple :
     HasTypeArgs Γ Δ Λ F exprs τs →
@@ -252,12 +252,12 @@ inductive HasType :
 
   | record :
     HasTypeArgs Γ Δ Λ F (fieldExprs.map fun (_, _, _, e) => e) fieldTys →
-    HasType Γ Δ Λ F (.record fieldExprs) (.constr tid)
+    HasType Γ Δ Λ F (.record fieldExprs) (.constr tid fieldTys)
 
   | recordUpdate :
-    HasType Γ Δ Λ F rec_ (.constr tid) →
+    HasType Γ Δ Λ F rec_ (.constr tid ats) →
     HasTypeArgs Γ Δ Λ F (updFields.map fun (_, _, _, e) => e) _ →
-    HasType Γ Δ Λ F (.recordUpdate rec_ updFields fieldsNum) (.constr tid)
+    HasType Γ Δ Λ F (.recordUpdate rec_ updFields fieldsNum) (.constr tid ats)
 
   | array :
     HasTypeArgs Γ Δ Λ F exprs (List.replicate exprs.length elemTy) →
@@ -270,15 +270,17 @@ inductive HasType :
     τs[pos]? = some τ →
     HasType Γ Δ Λ F (.field rec_ acc pos) τ
 
-  /-- Field access from a constr or record (both have type .constr tid). -/
+  /-- Field access from a constr or record (both have type .constr tid argTypes).
+      argTypes constrains fieldTy via positional lookup. -/
   | fieldHeap :
-    HasType Γ Δ Λ F rec_ (.constr tid) →
+    HasType Γ Δ Λ F rec_ (.constr tid argTypes) →
+    argTypes[pos]? = some fieldTy →
     HasType Γ Δ Λ F (.field rec_ acc pos) fieldTy
 
   -- ═══════════ Mutation ═══════════
 
   | mutate :
-    HasType Γ Δ Λ F rec_ (.constr tid) →
+    HasType Γ Δ Λ F rec_ (.constr tid ats) →
     HasType Γ Δ Λ F fld fieldTy →
     HasType Γ Δ Λ F (.mutate rec_ label fld pos) .unit
 
@@ -311,10 +313,10 @@ inductive HasType :
 
   /-- Switch on constructors: all branches (and default) must have type τ. -/
   | switchConstr :
-    HasType Γ Δ Λ F obj (.constr tid) →
+    HasType Γ Δ Λ F obj (.constr tid ats) →
     (∀ tag binder branch, findConstrCase cases tag = some (binder, branch) →
       HasType (match binder with
-        | some x => TyEnv.extend Γ x (.constr tid)
+        | some x => TyEnv.extend Γ x (.constr tid ats)
         | none => Γ) Δ Λ F branch τ) →
     (∀ d, dflt = some d → HasType Γ Δ Λ F d τ) →
     HasType Γ Δ Λ F (.switchConstr obj cases dflt) τ
@@ -365,7 +367,7 @@ inductive HasType :
 
   | handleErrorToResult :
     HasType Γ Δ Λ F obj τ →
-    HasType Γ Δ Λ F (.handleError obj .toResult) (.constr resultTid)
+    HasType Γ Δ Λ F (.handleError obj .toResult) (.constr resultTid [τ])
 
   | handleErrorJoinapply :
     HasType Γ Δ Λ F obj τ →
@@ -423,12 +425,13 @@ inductive ValueHasType : Value → Mtype → Prop where
   | rawFn :
     ValueHasType (.rawFn params body) (.rawFunc (params.map (·.ty)) retTy)
   | constr :
-    ValueHasType (.constr tag args) (.constr tid)
+    ValueListHasType args argTypes →
+    ValueHasType (.constr tag args) (.constr tid argTypes)
   | tuple :
     ValueListHasType vals τs →
     ValueHasType (.tuple vals) (.tuple τs)
   | locConstr :
-    ValueHasType (.loc l) (.constr tid)
+    ValueHasType (.loc l) (.constr tid ats)
   | locArray :
     ValueHasType (.loc l) (.fixedarray elemTy)
 
@@ -459,11 +462,16 @@ inductive ValClosureOk : Value → Mtype → FnTyTable → Prop where
     (∀ cap ps bd, v ≠ .closure cap ps bd) →
     (∀ vals, v ≠ .tuple vals) →
     (∀ ps bd, v ≠ .rawFn ps bd) →
+    (∀ tag args, v ≠ .constr tag args) →
     ValClosureOk v τ F
   | tuple :
     (hvals : ∀ i (hv : i < vals.length) (hτ : i < τs.length),
       ValClosureOk (vals[i]'hv) (τs[i]'hτ) F) →
     ValClosureOk (.tuple vals) (.tuple τs) F
+  | constr :
+    (hvals : ∀ i (hv : i < args.length) (hτ : i < argTypes.length),
+      ValClosureOk (args[i]'hv) (argTypes[i]'hτ) F) →
+    ValClosureOk (.constr tag args) (.constr tid argTypes) F
   | closure :
     (hptys : paramTys = params.map (·.ty)) →
     (hcapWT : EnvWellTyped captured Γcap) →

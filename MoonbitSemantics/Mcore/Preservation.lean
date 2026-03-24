@@ -118,13 +118,14 @@ invariant is maintained by all evaluation rules and gives us
 the body typing at application sites.
 -/
 
-/-- Non-closure, non-tuple, non-rawFn values trivially satisfy ValClosureOk. -/
+/-- Non-closure, non-tuple, non-rawFn, non-constr values trivially satisfy ValClosureOk. -/
 theorem ValClosureOk.of_not_closure'
     (h : ∀ cap ps bd, v ≠ .closure cap ps bd)
     (h2 : ∀ vals, v ≠ .tuple vals := by intro _ h; cases h)
-    (h3 : ∀ ps bd, v ≠ .rawFn ps bd := by intro _ _ h; cases h) :
+    (h3 : ∀ ps bd, v ≠ .rawFn ps bd := by intro _ _ h; cases h)
+    (h4 : ∀ tag args, v ≠ .constr tag args := by intro _ _ h; cases h) :
     ValClosureOk v τ F :=
-  .not_closure h h2 h3
+  .not_closure h h2 h3 h4
 
 /-- Extract per-element ValClosureOk from a tuple's proof. -/
 theorem ValClosureOk.tuple_getAt?
@@ -144,7 +145,27 @@ theorem ValClosureOk.tuple_getAt?
     rw [List.getElem?_eq_getElem hlen_τ] at hτ
     simp at hv hτ; rw [← hv, ← hτ]
     exact hvals pos hlen_v hlen_τ
-  | .not_closure _ htup _ => exact absurd rfl (htup _)
+  | .not_closure _ htup _ _ => exact absurd rfl (htup _)
+
+/-- Extract per-element ValClosureOk from a constr's proof. -/
+theorem ValClosureOk.constr_getAt?
+    {args : List Value} {argTypes : List Mtype} {pos : Nat} {v : Value} {τ : Mtype}
+    (hcl : ValClosureOk (.constr tag args) (.constr tid argTypes) F)
+    (hv : args[pos]? = some v) (hτ : argTypes[pos]? = some τ) :
+    ValClosureOk v τ F := by
+  match hcl with
+  | .constr hvals =>
+    have hlen_v : pos < args.length := by
+      by_contra hlt; push_neg at hlt
+      simp [List.getElem?_eq_none_iff.mpr (by omega)] at hv
+    have hlen_τ : pos < argTypes.length := by
+      by_contra hlt; push_neg at hlt
+      simp [List.getElem?_eq_none_iff.mpr (by omega)] at hτ
+    rw [List.getElem?_eq_getElem hlen_v] at hv
+    rw [List.getElem?_eq_getElem hlen_τ] at hτ
+    simp at hv hτ; rw [← hv, ← hτ]
+    exact hvals pos hlen_v hlen_τ
+  | .not_closure _ _ _ hnotconstr => exact absurd rfl (hnotconstr _ _)
 
 /-- Every closure in env has a well-typed body given its captured env. -/
 def ClosureInvariant (env : Env) (Γ : TyEnv) (F : FnTyTable) : Prop :=
@@ -307,7 +328,7 @@ theorem ValueListHasType.getAt?
 
 /-- A tuple value can only have tuple type. -/
 theorem ValueHasType.tuple_not_constr
-    (h : ValueHasType (.tuple vs) (.constr tid)) : False := by
+    (h : ValueHasType (.tuple vs) (.constr tid ats)) : False := by
   cases h
 
 /-- A constr value can only have constr type. -/
@@ -367,10 +388,10 @@ def OutcomeHasType.getVal : OutcomeHasType (.val v) τ Λ F → ValueHasType v �
 /-- Helper: EnvWellTyped through a switchConstr binder match. -/
 private theorem switchConstrEnvWT
     (binder : Option Var) (henv : EnvWellTyped env Γ)
-    (hvt : ValueHasType v (.constr tid)) :
+    (hvt : ValueHasType v (.constr tid ats)) :
     EnvWellTyped
       (match binder with | some x => Env.extend env x v | none => env)
-      (match binder with | some x => TyEnv.extend Γ x (.constr tid) | none => Γ) := by
+      (match binder with | some x => TyEnv.extend Γ x (.constr tid ats) | none => Γ) := by
   cases binder with
   | some x => exact EnvWellTyped.extend_preserves henv hvt
   | none => exact henv
@@ -378,10 +399,10 @@ private theorem switchConstrEnvWT
 /-- Helper: ClosureInvariant through a switchConstr binder match. -/
 private theorem switchConstrCInv
     (binder : Option Var) (hcinv : ClosureInvariant env Γ F)
-    (hcl : ValClosureOk v (.constr tid) F) :
+    (hcl : ValClosureOk v (.constr tid ats) F) :
     ClosureInvariant
       (match binder with | some x => Env.extend env x v | none => env)
-      (match binder with | some x => TyEnv.extend Γ x (.constr tid) | none => Γ) F := by
+      (match binder with | some x => TyEnv.extend Γ x (.constr tid ats) | none => Γ) F := by
   cases binder with
   | some x => exact ClosureInvariant.extend hcinv hcl
   | none => exact hcinv
@@ -496,10 +517,10 @@ private theorem evalPrim_valClosureOk
       ValClosureOk (argVals[i]'hv) (argTys[i]'hτ) F) :
     ValClosureOk v τ F := by
   match v with
-  | .const _ | .unit | .constr _ _ | .loc _ =>
+  | .const _ | .unit | .loc _ =>
     exact .not_closure (fun _ _ _ h => by cases h) (fun _ h => by cases h)
-      (fun _ _ h => by cases h)
-  | .closure _ _ _ | .tuple _ | .rawFn _ _ =>
+      (fun _ _ h => by cases h) (fun _ _ h => by cases h)
+  | .closure _ _ _ | .tuple _ | .rawFn _ _ | .constr _ _ =>
     have hid : op = .identity := by
       by_contra hop
       rcases evalPrim_non_identity_constOrUnit hop heval with ⟨_, h⟩ | h <;> exact nomatch h
@@ -737,7 +758,7 @@ def preservation
     | .mutate _ htype_fld => (preservation htype_fld heval_fld henv hft hcinv hdisj hftc hjwt).weaken hab
   | .fieldAbort heval_rec hab => match htype with
     | .fieldTuple htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt).weaken hab
-    | .fieldHeap htype_rec => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt).weaken hab
+    | .fieldHeap htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt).weaken hab
   | .ifAbort heval_cond hab => match htype with
     | .ifSome htype_cond _ _ => (preservation htype_cond heval_cond henv hft hcinv hdisj hftc hjwt).weaken hab
     | .ifNone htype_cond _ => (preservation htype_cond heval_cond henv hft hcinv hdisj hftc hjwt).weaken hab
@@ -801,8 +822,10 @@ def preservation
     | .assign _ _ => .val' .unit (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
   | .mutate _ _ _ => match htype with
     | .mutate _ _ => .val' .unit (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
-  | .constr _ => match htype with
-    | .constr _ => .val' .constr (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
+  | .constr heval_args => match htype with
+    | .constr htype_args =>
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt
+      .val' (.constr apr.hasTypes) (.constr apr.closureOks)
   | .record _ => match htype with
     | .record _ => .val' .locConstr (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
   | .array _ => match htype with
@@ -900,18 +923,22 @@ def preservation
       let .val (.tuple hvts) := pr.hasType
       let v_typed := hvts.getAt? _ hfield hpos
       .val' v_typed (ValClosureOk.tuple_getAt? (pr.closureOk _ rfl) hfield hpos)
-    | .fieldHeap htype_rec =>
+    | .fieldHeap htype_rec _ =>
       let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt
       let .val hvt := pr.hasType
       absurd hvt (by intro h; exact ValueHasType.tuple_not_constr h)
   | .fieldConstr heval_rec hfield => match htype with
-    | .fieldHeap _ => sorry -- need TypeDefs to constrain fieldTy
+    | .fieldHeap htype_rec hpos =>
+      let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt
+      let .val (.constr hvl) := pr.hasType
+      let v_typed := hvl.getAt? _ hfield hpos
+      .val' v_typed (ValClosureOk.constr_getAt? (pr.closureOk _ rfl) hfield hpos)
     | .fieldTuple htype_rec _ =>
       let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt
       let .val hvt := pr.hasType
       absurd hvt (by intro h; exact ValueHasType.constr_not_tuple h)
   | .fieldRecord heval_rec _ hfield => match htype with
-    | .fieldHeap _ => sorry -- need TypeDefs/store typing
+    | .fieldHeap htype_rec _ => sorry -- need store typing to relate heap fields to argTypes
     | .fieldTuple htype_rec _ =>
       let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt
       let .val hvt := pr.hasType
@@ -971,7 +998,7 @@ def preservation
             exact hptys ▸ this)
         (preservation hbodyTyped heval_body henv_body hft hcinv_body
           (FnEnvDisjoint.bindParams hcapDisj _ _ hclosParams) hftc JoinWellTyped.empty).liftFromEmptyΛ
-      | .not_closure hnotcl _ _ => absurd rfl (hnotcl _ _ _)
+      | .not_closure hnotcl _ _ _ => absurd rfl (hnotcl _ _ _)
       | .recClosure hptys hrecEnv hbaseWT hbaseInv hbaseDisj hFname hclosParams hbodyTyped =>
         let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt
         let hvts' := hptys ▸ apr.hasTypes
@@ -1052,7 +1079,7 @@ def preservation
             exact hptys ▸ this)
         (preservation hbodyTyped heval_body henv_body hft hcinv_body
           (FnEnvDisjoint.bindParams FnEnvDisjoint.empty _ _ hclosParams) hftc JoinWellTyped.empty).liftFromEmptyΛ
-      | .not_closure _ _ hnotrfn => absurd rfl (hnotrfn _ _)
+      | .not_closure _ _ hnotrfn _ => absurd rfl (hnotrfn _ _)
     | .applyClosure hΓ _ =>
       absurd (EnvWellTyped.lookup henv hΓ hfn) (fun h => ValueHasType.rawFn_not_func h)
     | .applyTopFn hF _ => absurd hF (by rw [hdisj.2 _ _ _ hfn]; exact fun h => nomatch h)
@@ -1181,10 +1208,15 @@ def preservation
   -- ════════ Error handling ════════
   | .handleErrorToResultOk heval_obj => match htype with
     | .handleErrorToResult htype_obj =>
-      .val' .constr (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
+      let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt
+      let hvt := pr.hasType.getVal
+      let hcl := pr.closureOk _ rfl
+      .val' (.constr (.cons hvt .nil)) (.constr (fun i hv hτ => by
+        have hi : i = 0 := by simp at hv; omega
+        subst hi; simp at hv hτ ⊢; exact hcl))
   | .handleErrorToResultErr heval_obj => match htype with
     | .handleErrorToResult _ =>
-      .val' .constr (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
+      sorry -- error value type unknown; needs error type tracking in OutcomeHasType
   | .handleErrorJoinOk heval_obj => match htype with
     | .handleErrorJoinapply htype_obj _ => preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt
   | .handleErrorJoinErr heval_obj _ heval_body => sorry -- needs join env typing

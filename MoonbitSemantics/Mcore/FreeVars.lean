@@ -91,7 +91,7 @@ def HasType.strengthen
   | .recordUpdate hrec hflds => .recordUpdate (hrec.strengthen hsub) (hflds.strengthen hsub)
   | .array hargs => .array (hargs.strengthen hsub)
   | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen hsub) hp
-  | .fieldHeap hrec => .fieldHeap (hrec.strengthen hsub)
+  | .fieldHeap hrec hpos => .fieldHeap (hrec.strengthen hsub) hpos
   | .mutate hrec hfld => .mutate (hrec.strengthen hsub) (hfld.strengthen hsub)
   | .assign hΓ he => .assign (hsub _ _ hΓ) (he.strengthen hsub)
   | .seq hargs hlast => .seq (hargs.strengthen hsub) (hlast.strengthen hsub)
@@ -193,7 +193,7 @@ def HasType.strengthen_Δ
   | .recordUpdate hrec hflds => .recordUpdate (hrec.strengthen_Δ hsub) (hflds.strengthen_Δ hsub)
   | .array hargs => .array (hargs.strengthen_Δ hsub)
   | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen_Δ hsub) hp
-  | .fieldHeap hrec => .fieldHeap (hrec.strengthen_Δ hsub)
+  | .fieldHeap hrec hpos => .fieldHeap (hrec.strengthen_Δ hsub) hpos
   | .mutate hrec hfld => .mutate (hrec.strengthen_Δ hsub) (hfld.strengthen_Δ hsub)
   | .assign hΓ he => .assign hΓ (he.strengthen_Δ hsub)
   | .seq hargs hlast => .seq (hargs.strengthen_Δ hsub) (hlast.strengthen_Δ hsub)
@@ -288,7 +288,7 @@ def HasType.strengthen_Λ
   | .recordUpdate hrec hflds => .recordUpdate (hrec.strengthen_Λ hsub) (hflds.strengthen_Λ hsub)
   | .array hargs => .array (hargs.strengthen_Λ hsub)
   | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen_Λ hsub) hp
-  | .fieldHeap hrec => .fieldHeap (hrec.strengthen_Λ hsub)
+  | .fieldHeap hrec hpos => .fieldHeap (hrec.strengthen_Λ hsub) hpos
   | .mutate hrec hfld => .mutate (hrec.strengthen_Λ hsub) (hfld.strengthen_Λ hsub)
   | .assign hΓ he => .assign hΓ (he.strengthen_Λ hsub)
   | .seq hargs hlast => .seq (hargs.strengthen_Λ hsub) (hlast.strengthen_Λ hsub)
