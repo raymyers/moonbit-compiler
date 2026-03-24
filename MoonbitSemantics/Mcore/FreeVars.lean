@@ -76,8 +76,8 @@ def HasType.strengthen
     .letfnTailJoin (hfn.strengthen (TyEnv.bindParams_mono hsub _)) (hbd.strengthen hsub)
   | .letfnNontailJoin hfn hbd =>
     .letfnNontailJoin (hfn.strengthen (TyEnv.bindParams_mono hsub _)) (hbd.strengthen hsub)
-  | .letrec hrec hbodies hbody =>
-    .letrec rfl
+  | .letrec hrec hFnames hFparams hbodies hbody =>
+    .letrec rfl hFnames hFparams
       (fun i hi => (hbodies i hi).strengthen (TyEnv.bindParams_mono (fun x τ' h => TyEnv.extendMany_mono hsub _ x τ' (hrec ▸ h)) _))
       (hbody.strengthen (fun x τ' h => TyEnv.extendMany_mono hsub _ x τ' (hrec ▸ h)))
   | .applyClosure hΓ hargs => .applyClosure (hsub _ _ hΓ) (hargs.strengthen hsub)

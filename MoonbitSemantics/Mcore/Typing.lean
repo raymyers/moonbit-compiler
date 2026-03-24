@@ -201,6 +201,8 @@ inductive HasType :
   | letrec :
     recΓ = TyEnv.extendMany Γ
       ((bindings.map (·.1)).zip (bindings.map fun (_, ps, _) => Mtype.func (ps.map (·.ty)) retTy)) →
+    (∀ j (hj : j < bindings.length), F (bindings[j]'hj).1 = none) →
+    (∀ j (hj : j < bindings.length) p, p ∈ (bindings[j]'hj).2.1 → F p.binder = none) →
     (∀ i (h : i < bindings.length),
       HasType (TyEnv.bindParams recΓ (bindings[i].2.1))
         JoinTyEnv.empty LoopTyEnv.empty F (bindings[i].2.2) retTy) →
@@ -486,6 +488,25 @@ inductive ValClosureOk : Value → Mtype → FnTyTable → Prop where
     (hbody : HasType (TyEnv.bindParams (TyEnv.extend Γbase name (.func paramTys retTy)) params)
         JoinTyEnv.empty LoopTyEnv.empty F body retTy) →
     ValClosureOk (.closure recEnv params body) (.func paramTys retTy) F
+  | recMutualClosure
+    {bindings : List (Var × List Param × Expr)} :
+    (hptys : paramTys_i = params_i.map (·.ty)) →
+    (hrecEnv : recEnv = Env.extendMany baseEnv
+      (bindings.map fun (v, ps, b) => (v, Value.closure recEnv ps b))) →
+    (hrecΓ : recΓ = TyEnv.extendMany Γbase
+      ((bindings.map fun b => b.1).zip
+        (bindings.map fun (_, ps, _) => Mtype.func (ps.map (·.ty)) retTy))) →
+    (hidx : i < bindings.length) →
+    (hbinding : (bindings[i]'hidx) = (name_i, params_i, body_i)) →
+    (hbaseWT : EnvWellTyped baseEnv Γbase) →
+    (hbaseInv : ∀ x v' τ', baseEnv x = some v' → Γbase x = some τ' → ValClosureOk v' τ' F) →
+    (hbaseDisj : FnEnvDisjoint baseEnv F) →
+    (hFnames : ∀ j (hj : j < bindings.length), F (bindings[j]'hj).1 = none) →
+    (hparams : ∀ j (hj : j < bindings.length) p, p ∈ (bindings[j]'hj).2.1 → F p.binder = none) →
+    (hbodies : ∀ j (hj : j < bindings.length),
+      HasType (TyEnv.bindParams recΓ ((bindings[j]'(by omega)).2.1))
+        JoinTyEnv.empty LoopTyEnv.empty F ((bindings[j]'(by omega)).2.2) retTy) →
+    ValClosureOk (.closure recEnv params_i body_i) (.func paramTys_i retTy) F
 
 /-- Outcome typing. Break outcomes carry value typing from the Λ lookup. -/
 inductive OutcomeHasType : Outcome → Mtype → LoopTyEnv → FnTyTable → Prop where

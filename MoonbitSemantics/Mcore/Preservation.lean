@@ -208,6 +208,68 @@ theorem ClosureInvariant.bindParams
       have hτ' : i + 1 < (p :: ps).length := by simp; omega
       exact hargsClos (i + 1) hv' hτ'
 
+/-! ## extendMany helper lemmas -/
+
+theorem EnvWellTyped.extendMany_preserves
+    (hwt : EnvWellTyped env Γ)
+    (vs : List (Var × Value)) (τs : List (Var × Mtype))
+    (hlen : vs.length = τs.length)
+    (hnames : ∀ i (hi : i < vs.length), (vs[i]'hi).1 = (τs[i]'(by omega)).1)
+    (htypes : ∀ i (hi : i < vs.length),
+      ValueHasType (vs[i]'hi).2 (τs[i]'(by omega)).2) :
+    EnvWellTyped (Env.extendMany env vs) (TyEnv.extendMany Γ τs) := by
+  simp only [Env.extendMany, TyEnv.extendMany]
+  induction vs generalizing τs env Γ with
+  | nil => match τs with | [] => exact hwt
+  | cons v vs' ih =>
+    match τs with
+    | t :: τs' =>
+      simp [List.foldl]
+      have hname0 := hnames 0 (by simp)
+      simp at hname0
+      rw [← hname0]
+      apply ih (EnvWellTyped.extend_preserves hwt (htypes 0 (by simp))) τs'
+        (by simp at hlen; omega)
+        (fun i hi => hnames (i + 1) (by simp; omega))
+        (fun i hi => htypes (i + 1) (by simp; omega))
+
+theorem ClosureInvariant.extendMany
+    (hinv : ClosureInvariant env Γ F)
+    (vs : List (Var × Value)) (τs : List (Var × Mtype))
+    (hlen : vs.length = τs.length)
+    (hnames : ∀ i (hi : i < vs.length), (vs[i]'hi).1 = (τs[i]'(by omega)).1)
+    (hclos : ∀ i (hi : i < vs.length),
+      ValClosureOk (vs[i]'hi).2 (τs[i]'(by omega)).2 F) :
+    ClosureInvariant (Env.extendMany env vs) (TyEnv.extendMany Γ τs) F := by
+  simp only [Env.extendMany, TyEnv.extendMany]
+  induction vs generalizing τs env Γ with
+  | nil => match τs with | [] => exact hinv
+  | cons v vs' ih =>
+    match τs with
+    | t :: τs' =>
+      simp [List.foldl]
+      have hname0 := hnames 0 (by simp)
+      simp at hname0
+      rw [← hname0]
+      apply ih (ClosureInvariant.extend hinv (hclos 0 (by simp))) τs'
+        (by simp at hlen; omega)
+        (fun i hi => hnames (i + 1) (by simp; omega))
+        (fun i hi => hclos (i + 1) (by simp; omega))
+
+theorem FnEnvDisjoint.extendMany_closures
+    (hdisj : FnEnvDisjoint env F)
+    (vs : List (Var × Value)) :
+    (∀ i (hi : i < vs.length), F (vs[i]'hi).1 = none) →
+    FnEnvDisjoint (Env.extendMany env vs) F := by
+  simp only [Env.extendMany]
+  induction vs generalizing env with
+  | nil => intros; exact hdisj
+  | cons v vs' ih =>
+    intro hFnone
+    simp [List.foldl]
+    apply ih (FnEnvDisjoint.extend hdisj (hFnone 0 (by simp)))
+      (fun i hi => hFnone (i + 1) (by simp; omega))
+
 /-! ## ValueListHasType indexing -/
 
 /-- Length agreement for ValueListHasType. -/
@@ -655,8 +717,28 @@ def preservation
     | .letfnNontailJoin _ htype_body =>
       preservation htype_body heval_body henv hft hcinv hdisj hftc
 
-  | .letrec _ heval_body => match htype with
-    | .letrec _ _ htype_body => sorry -- needs recursive env typing
+  | .letrec hrecEnv_eq heval_body => match htype with
+    | .letrec (bindings := bindings) hrecΓ_eq hFnames hFparams hbodies htype_body => by
+      -- Build the three invariants for recEnv/recΓ and call preservation on body
+      refine preservation htype_body heval_body ?_ hft ?_ ?_ hftc
+      · -- EnvWellTyped recEnv recΓ
+        rw [hrecEnv_eq, hrecΓ_eq]
+        apply EnvWellTyped.extendMany_preserves henv
+        case hlen => simp [List.length_map, List.length_zip]
+        case hnames => intro i hi; simp [List.getElem_map]
+        case htypes => intro i hi; simp [List.getElem_map]; exact ValueHasType.closure
+      · -- ClosureInvariant recEnv recΓ F
+        rw [hrecEnv_eq, hrecΓ_eq]
+        apply ClosureInvariant.extendMany (fun x v τ h1 h2 => hcinv x v τ h1 h2)
+        case hlen => simp [List.length_map, List.length_zip]
+        case hnames => intro i hi; simp [List.getElem_map]
+        case hclos => intro i hi; simp [List.getElem_map, List.length_map] at hi ⊢
+                      exact .recMutualClosure rfl hrecEnv_eq hrecΓ_eq hi rfl
+                        henv hcinv hdisj hFnames hFparams hbodies
+      · -- FnEnvDisjoint recEnv F
+        rw [hrecEnv_eq]
+        apply FnEnvDisjoint.extendMany_closures hdisj
+        intro i hi; simp [List.length_map] at hi; simp [List.getElem_map]; exact hFnames i hi
 
   | .ifTrue heval_cond heval_so => match htype with
     | .ifSome _ htype_so _ => preservation htype_so heval_so henv hft hcinv hdisj hftc
@@ -757,10 +839,13 @@ def preservation
         let hvts' := hptys ▸ apr.hasTypes
         let hlen_bp := by
           have := hvts'.length_eq; simp [List.length_map] at this; omega
-        -- Build ClosureInvariant for recEnv: for name → use cinv_func, for others → use hbaseInv
+        -- Reconstruct cinv_func to avoid type ambiguity
+        let cinv_func' := ValClosureOk.recClosure hptys hrecEnv hbaseWT hbaseInv hbaseDisj
+          hFname hclosParams hbodyTyped
+        -- Build ClosureInvariant for recEnv: for name → use cinv_func', for others → use hbaseInv
         let hcapCinv : ClosureInvariant _ (TyEnv.extend _ _ _) F := by
           rw [hrecEnv]
-          exact ClosureInvariant.extend (fun x v τ h1 h2 => hbaseInv x v τ h1 h2) cinv_func
+          exact ClosureInvariant.extend (fun x v τ h1 h2 => hbaseInv x v τ h1 h2) cinv_func'
         let hcapWT := hrecEnv ▸ EnvWellTyped.extend_preserves hbaseWT (hptys ▸ ValueHasType.closure)
         let henv_body := EnvWellTyped.bindParams_preserves hcapWT _ _ hvts' hlen_bp
         let hcinv_body := ClosureInvariant.bindParams hcapCinv _ _ hvts' hlen_bp
@@ -770,6 +855,44 @@ def preservation
             exact hptys ▸ this)
         (preservation hbodyTyped heval_body henv_body hft hcinv_body
           (FnEnvDisjoint.bindParams (hrecEnv ▸ hbaseDisj.extend hFname) _ _ hclosParams) hftc).liftFromEmptyΛ
+      | .recMutualClosure (bindings := bindings_cl)
+          hptys_cl hrecEnv_cl hrecΓ_cl hidx hbinding hbaseWT_cl hbaseInv_cl hbaseDisj_cl
+          hFnames_cl hparams_cl hbodies_cl => by
+        -- Get body typing and params for binding i
+        have hbody_typed := hbodies_cl _ hidx
+        have hparams_i := fun p hp => hparams_cl _ hidx p hp
+        rw [hbinding] at hbody_typed hparams_i; simp at hbody_typed hparams_i
+        have apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc
+        have hvts' := hptys_cl ▸ apr.hasTypes
+        -- Build the three invariants
+        refine (preservation hbody_typed heval_body ?_ hft ?_ ?_ hftc).liftFromEmptyΛ
+        · -- EnvWellTyped (bindParams captured✝ params✝ argVals✝) (TyEnv.bindParams recΓ✝ params✝)
+          rw [hrecEnv_cl]
+          apply EnvWellTyped.bindParams_preserves _ _ _ hvts' hlen_clo
+          rw [hrecΓ_cl]
+          apply EnvWellTyped.extendMany_preserves hbaseWT_cl
+          case hlen => simp [List.length_map, List.length_zip]
+          case hnames => intro i hi; simp [List.getElem_map]
+          case htypes => intro i hi; simp [List.getElem_map]; exact ValueHasType.closure
+        · -- ClosureInvariant
+          rw [hrecEnv_cl]
+          apply ClosureInvariant.bindParams _ _ _ hvts' hlen_clo
+            (fun i hv hτ => by
+              have := apr.closureOks i hv (by subst hptys_cl; simp [List.length_map]; exact hτ)
+              exact hptys_cl ▸ this)
+          rw [hrecΓ_cl]
+          apply ClosureInvariant.extendMany (fun x v τ h1 h2 => hbaseInv_cl x v τ h1 h2)
+          case hlen => simp [List.length_map, List.length_zip]
+          case hnames => intro i hi; simp [List.getElem_map]
+          case hclos => intro i hi; simp [List.getElem_map]
+                        simp [List.length_map] at hi
+                        exact .recMutualClosure rfl hrecEnv_cl hrecΓ_cl hi rfl
+                          hbaseWT_cl hbaseInv_cl hbaseDisj_cl hFnames_cl hparams_cl hbodies_cl
+        · -- FnEnvDisjoint
+          rw [hrecEnv_cl]
+          apply FnEnvDisjoint.bindParams _ _ _ hparams_i
+          apply FnEnvDisjoint.extendMany_closures hbaseDisj_cl
+          intro i hi; simp [List.length_map] at hi; simp [List.getElem_map]; exact hFnames_cl i hi
     | .applyRawFn hΓ _ =>
       absurd (EnvWellTyped.lookup henv hΓ hclos) (fun h => ValueHasType.closure_not_rawFunc h)
     | .applyTopFn hF _ => absurd hF (by rw [hdisj.1 _ _ _ _ hclos]; exact fun h => nomatch h)
