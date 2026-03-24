@@ -23,7 +23,7 @@ def OutcomeHasType.weaken : OutcomeHasType o τ₁ Λ F → o.isAbort → Outcom
   | .breakNone hΛ, _ => .breakNone hΛ
   | .continue hΛ hvts hclos, _ => .continue hΛ hvts hclos
   | .return, _ => .return
-  | .error, _ => .error
+  | .error hvt, _ => .error hvt
 
 def EvalArgsAbort.outcome_isAbort :
     EvalArgsAbort ft env s jt lt nl es outcome s' nl' → outcome.isAbort
@@ -492,7 +492,7 @@ def PresResult.liftFromEmptyΛ (pr : PresResult outcome τ F LoopTyEnv.empty) :
     | breakNone hΛ => exact absurd hΛ (by simp [LoopTyEnv.empty])
     | «continue» hΛ => exact absurd hΛ (by simp [LoopTyEnv.empty])
     | «return» => exact .return
-    | error => exact .error
+    | error hvt => exact .error hvt
   closureOk := pr.closureOk
 
 /-- Lift from an inner Λ when the outcome is a value (break info vacuous). -/
@@ -501,8 +501,8 @@ def PresResult.liftVal (pr : PresResult (.val v) τ F Λ₁) :
   .val' (pr.hasType.getVal) (pr.closureOk _ rfl)
 
 /-- Error result. -/
-def PresResult.error' : PresResult (.error v) τ F Λ where
-  hasType := .error
+def PresResult.error' (hvt : ValueHasType v errTy) : PresResult (.error v) τ F Λ where
+  hasType := .error hvt
   closureOk := fun _ h => nomatch h
 
 
@@ -1203,7 +1203,17 @@ def preservation
   | .loopReturn heval_args heval_body => match htype with
     | .loop _ htype_args htype_body => .return'
   | .loopError heval_args heval_body => match htype with
-    | .loop _ htype_args htype_body => .error'
+    | .loop hloopParams htype_args htype_body =>
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt
+      let hlen := by
+        have := apr.hasTypes.length_eq; simp [List.length_map] at this; omega
+      let henv' := EnvWellTyped.bindParams_preserves henv _ _ apr.hasTypes hlen
+      let hcinv' := ClosureInvariant.bindParams hcinv _ _ apr.hasTypes hlen
+        (fun i hv hτ => apr.closureOks i hv (by simp [List.length_map]; exact hτ))
+      let pr := preservation htype_body heval_body henv' hft hcinv'
+        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop
+      let .error hvt := pr.hasType
+      .error' hvt
 
   -- ════════ Error handling ════════
   | .handleErrorToResultOk heval_obj => match htype with
@@ -1215,15 +1225,20 @@ def preservation
         have hi : i = 0 := by simp at hv; omega
         subst hi; simp at hv hτ ⊢; exact hcl))
   | .handleErrorToResultErr heval_obj => match htype with
-    | .handleErrorToResult _ =>
-      sorry -- error value type unknown; needs error type tracking in OutcomeHasType
+    | .handleErrorToResult htype_obj =>
+      let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt
+      let .error _hvt := pr.hasType
+      sorry -- hvt : ValueHasType v errTy, but need ValueHasType v τ; requires errTy in Result type
   | .handleErrorJoinOk heval_obj => match htype with
     | .handleErrorJoinapply htype_obj _ => preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt
   | .handleErrorJoinErr heval_obj _ heval_body => sorry -- needs join env typing
   | .handleErrorReturnErrOk heval_obj => match htype with
     | .handleErrorReturnErr htype_obj => preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt
   | .handleErrorReturnErrErr heval_obj => match htype with
-    | .handleErrorReturnErr _ => .error'
+    | .handleErrorReturnErr htype_obj =>
+      let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt
+      let .error hvt := pr.hasType
+      .error' hvt
   | .handleErrorPropagate heval_obj hnotval hnoterr => match htype with
     | .handleErrorToResult htype_obj =>
       (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt).weaken
@@ -1239,7 +1254,9 @@ def preservation
   | .returnSingle heval_e => match htype with
     | .returnSingle htype_e => preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt
   | .returnError heval_e => match htype with
-    | .returnErr _ => .error'
+    | .returnErr htype_e =>
+      let pr := preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt
+      .error' pr.hasType.getVal
   | .returnOk heval_e => match htype with
     | .returnOk htype_e => preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt
 
@@ -1310,7 +1327,16 @@ def preservationLoopReentry
       exact preservationLoopReentry htype_body hreentry_inner henv hft hcinv hdisj hftc hjwt
         hloopParams hvts_next hclos_next
   | .return heval_body => exact .return'
-  | .error heval_body => exact .error'
+  | .error heval_body =>
+    have hlen : params.length = newVals.length := by
+      have := hvts.length_eq; simp [List.length_map] at this; omega
+    let henv' := EnvWellTyped.bindParams_preserves henv _ _ hvts hlen
+    let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
+      (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
+    let pr := preservation htype_body heval_body henv' hft hcinv'
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop
+    let .error hvt := pr.hasType
+    exact .error' hvt
 
 def preservation_val
     (htype : HasType Γ Δ Λ F e τ)

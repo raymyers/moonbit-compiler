@@ -532,7 +532,7 @@ inductive OutcomeHasType : Outcome → Mtype → LoopTyEnv → FnTyTable → Pro
         ValClosureOk (args[i]'hv) (paramTys[i]'hτ) F) →
       OutcomeHasType (.continue args label) τ Λ F
   | «return» : OutcomeHasType (.return _) τ Λ F
-  | error : OutcomeHasType (.error _) τ Λ F
+  | error : ValueHasType v errTy → OutcomeHasType (.error v) τ Λ F
 
 /-- A closure is "semantically well-typed": calling with well-typed args
     produces well-typed outcomes. -/
