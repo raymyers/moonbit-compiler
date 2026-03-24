@@ -187,11 +187,13 @@ inductive HasType :
     HasType Γ Δ Λ F (.letfn name params fnBody body .recursive) τ
 
   | letfnTailJoin :
+    (∀ p, p ∈ params → F p.binder = none) →
     HasType (TyEnv.bindParams Γ params) Δ Λ F fnBody τ →
     HasType Γ (JoinTyEnv.extend Δ name ⟨params.map (·.ty), τ⟩) Λ F body τ →
     HasType Γ Δ Λ F (.letfn name params fnBody body .tailJoin) τ
 
   | letfnNontailJoin :
+    (∀ p, p ∈ params → F p.binder = none) →
     HasType (TyEnv.bindParams Γ params) Δ Λ F fnBody joinTy →
     HasType Γ (JoinTyEnv.extend Δ name ⟨params.map (·.ty), joinTy⟩) Λ F body τ →
     HasType Γ Δ Λ F (.letfn name params fnBody body .nontailJoin) τ
