@@ -437,6 +437,8 @@ inductive ValueHasType : Value → Mtype → Prop where
     ValueListHasType vals τs →
     ValueHasType (.tuple vals) (.tuple τs)
   | locConstr :
+    {σ : Loc → Option (List Mtype)} →
+    σ l = some ats →
     ValueHasType (.loc l) (.constr tid ats)
   | locArray :
     ValueHasType (.loc l) (.fixedarray elemTy)

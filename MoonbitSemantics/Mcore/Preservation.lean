@@ -12,6 +12,40 @@ namespace Moonbit.Mcore
 
 open Moonbit.Clam (Const Prim ArithOp CmpOp)
 
+/-! ## Store typing infrastructure -/
+
+/-- Store typing: maps locations to their expected field type lists. -/
+abbrev StoreTyping := Loc → Option (List Mtype)
+
+/-- A store is well-typed with respect to a store typing σ and function table F when:
+    every location mapped by σ contains a record whose fields have the expected types. -/
+def StoreWellTyped (s : Store) (σ : StoreTyping) (F : FnTyTable) : Prop :=
+  ∀ l argTypes,
+    σ l = some argTypes →
+    ∃ fields mutFlags,
+      s l = some (.record fields mutFlags) ∧
+      fields.size = argTypes.length ∧
+      ∀ i (hf : i < fields.size) (hτ : i < argTypes.length),
+        ValueHasType (fields[i]'hf) (argTypes[i]'hτ) ∧
+        ValClosureOk (fields[i]'hf) (argTypes[i]'hτ) F
+
+/-- Store typing monotonicity: σ₁ ⊆ σ₂ means σ₂ extends σ₁. -/
+def StoreTypingMono (σ₁ σ₂ : StoreTyping) : Prop :=
+  ∀ l ats, σ₁ l = some ats → σ₂ l = some ats
+
+/-- Store typing is preserved and extended through evaluation.
+    The output store is well-typed under an extended store typing that is
+    monotone with respect to the input. Requires full store typing threading
+    to prove; this is the key lemma for heap soundness. -/
+theorem eval_preserves_storeWT
+    {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable} {lt : LoopTable}
+    {nl : Loc} {e : Expr} {outcome : Outcome} {s' : Store} {nl' : Loc}
+    {σ : StoreTyping} {F : FnTyTable}
+    (_heval : Eval ft env s jt lt nl e outcome s' nl')
+    (_hswt : StoreWellTyped s σ F) :
+    ∃ σ', StoreWellTyped s' σ' F ∧ StoreTypingMono σ σ' :=
+  sorry -- requires full store typing threading through preservation (secondary)
+
 /-! ## Helpers -/
 
 @[simp] theorem Outcome.val_not_abort (v : Value) : ¬ (Outcome.val v).isAbort := by
@@ -718,6 +752,33 @@ theorem JoinWellTyped.extend_nontail
     obtain ⟨hmap', hfp', hbody'⟩ := hjwt func params' jbody' paramTys' retTy' hjt' hΔ'
     exact ⟨hmap', hfp', fun E => (hbody' E).strengthen_Δ hmono⟩
 
+/-- Extract field typing from StoreWellTyped evidence for fieldRecord.
+    Given that fields and types have matching sizes, each index is well-typed,
+    and fields[pos]? = some v and types[pos]? = some τ, conclude the preservation result. -/
+private theorem fieldRecord_from_storeWT
+    {fields : Array Value} {argTypes : List Mtype} {pos : Nat} {v : Value} {τ : Mtype}
+    {F : FnTyTable} {Λ : LoopTyEnv} {E : Option Mtype}
+    (_hsize : fields.size = argTypes.length)
+    (htyped : ∀ i (hf : i < fields.size) (hτ : i < argTypes.length),
+      ValueHasType (fields[i]'hf) (argTypes[i]'hτ) ∧
+      ValClosureOk (fields[i]'hf) (argTypes[i]'hτ) F)
+    (hfield : fields[pos]? = some v)
+    (hpos : argTypes[pos]? = some τ) :
+    PresResult (.val v) τ E F Λ := by
+  have hf_bound : pos < fields.size := by
+    by_contra h; push_neg at h
+    rw [Array.getElem?_eq_none_iff.mpr (by omega)] at hfield; exact nomatch hfield
+  have hτ_bound : pos < argTypes.length := by
+    by_contra h; push_neg at h
+    rw [List.getElem?_eq_none_iff.mpr (by omega)] at hpos; exact nomatch hpos
+  obtain ⟨hvt_f, hcl_f⟩ := htyped pos hf_bound hτ_bound
+  rw [Array.getElem?_eq_getElem hf_bound] at hfield
+  rw [List.getElem?_eq_getElem hτ_bound] at hpos
+  simp at hfield hpos
+  rw [hfield] at hvt_f hcl_f
+  rw [hpos] at hvt_f hcl_f
+  exact PresResult.val' hvt_f hcl_f
+
 set_option maxHeartbeats 3200000 in
 set_option maxRecDepth 1024 in
 mutual
@@ -878,11 +939,11 @@ def preservation
       let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt
       .val' (.constr apr.hasTypes) (.constr apr.closureOks)
   | .record _ => match htype with
-    | .record _ => .val' .locConstr (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
+    | .record _ => .val' (.locConstr (σ := fun _ => sorry) sorry) (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
   | .array _ => match htype with
     | .array _ => .val' .locArray (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
   | .recordUpdate _ _ _ _ => match htype with
-    | .recordUpdate _ _ => .val' .locConstr (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
+    | .recordUpdate _ _ => .val' (.locConstr (σ := fun _ => sorry) sorry) (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
   | .andFalse _ => match htype with
     | .and _ _ => .val' .const (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
   | .orTrue _ => match htype with
@@ -988,8 +1049,23 @@ def preservation
       let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt
       let .val hvt := pr.hasType
       absurd hvt (by intro h; exact ValueHasType.constr_not_tuple h)
-  | .fieldRecord heval_rec _ hfield => match htype with
-    | .fieldHeap htype_rec _ => sorry -- need store typing to relate heap fields to argTypes
+  | .fieldRecord heval_rec hstore hfield => match htype with
+    | .fieldHeap htype_rec hpos => by
+      -- IH: rec_ evaluates to .loc l with type .constr tid argTypes
+      have pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt
+      have hvt_loc := pr.hasType.getVal
+      -- Pattern match on ValueHasType (.loc l) (.constr tid argTypes)
+      match hvt_loc with
+      | .locConstr (σ := σ) hσ =>
+        -- hσ : σ l = some argTypes, hstore : s' l = some (.record fields _)
+        -- hfield : fields[pos]? = some v, hpos : argTypes[pos]? = some fieldTy
+        -- Store typing consistency: σ matches the actual output store s'
+        -- This requires full store typing threading through preservation (secondary sorry)
+        have hswt : StoreWellTyped s' σ F := sorry
+        obtain ⟨fields', mutFlags', hstore', hsize, htyped⟩ := hswt _ _ hσ
+        rw [hstore] at hstore'; cases hstore'
+        -- Extract field typing from StoreWellTyped evidence
+        exact fieldRecord_from_storeWT hsize htyped hfield hpos
     | .fieldTuple htype_rec _ =>
       let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt
       let .val hvt := pr.hasType
