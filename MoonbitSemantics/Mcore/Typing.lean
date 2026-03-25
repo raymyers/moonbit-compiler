@@ -486,6 +486,12 @@ inductive ValClosureOk : Value → Mtype → FnTyTable → Prop where
     (hvals : ∀ i (hv : i < args.length) (hτ : i < argTypes.length),
       ValClosureOk (args[i]'hv) (argTypes[i]'hτ) F) →
     ValClosureOk (.constr tag args) (.constr tid argTypes) F
+  | errorValueResultOk :
+    ValClosureOk v okTy F →
+    ValClosureOk (.constr 0 [v]) (.errorValueResult okTy errTy tid) F
+  | errorValueResultErr :
+    ValClosureOk v errTy F →
+    ValClosureOk (.constr 1 [v]) (.errorValueResult okTy errTy tid) F
   | closure :
     (hptys : paramTys = params.map (·.ty)) →
     (hcapWT : EnvWellTyped captured Γcap) →
