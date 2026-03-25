@@ -71,17 +71,16 @@ handleErrorReturnErrOk/Err, handleErrorPropagate
 - `evalPrim_type_sound'`: evalPrim preserves types (fully proven)
 - `evalPrim_non_identity_constOrUnit`: non-identity evalPrim returns const or unit
 
-## Remaining sorry: 21 total (11 Preservation + 10 FreeVars)
+## Remaining sorry: 20 total (12 Preservation + 8 FreeVars)
 
 ### Summary of sorry by category
 
-**FreeVars.lean (10 sorry):**
+**FreeVars.lean (8 sorry):**
 - 8 termination sorry (`decreasing_by all_goals sorry`) — Lean 4 limitation on
   universally-quantified sub-derivations in structural recursion
-- 2 E-strengthening sorry (handleErrorReturnErr, returnErr) — changing error type
-  parameter across error-handling boundaries
+  (4 mutual blocks: strengthen/Γ, strengthen_Δ, strengthen_Λ, strengthen_E_from_none)
 
-**Preservation.lean (11 sorry):**
+**Preservation.lean (12 sorry):**
 - 1 ANF Γ freshness (`weakenΓ_extend_anf`) — let-bound names fresh in Γ
 - 1 ANF Γ freshness for letrec (`extendMany_sub_of_fresh`) — binding names fresh in Γ
 - 1 ANF Γ freshness for letrec call site
@@ -89,6 +88,8 @@ handleErrorReturnErrOk/Err, handleErrorPropagate
 - 2 ANF loop freshness (`weakenΓΛ_loop_anf`) — loop label fresh in Λ, params fresh in Γ
 - 2 ANF join param freshness (applyJoin, handleErrorJoinErr) — join params fresh in Γ
 - 2 store typing sorry — requires full store typing threading through preservation
+- 1 E-strengthening sorry in `JoinWellTyped.changeE` (`some errTy` → E' case only;
+  `none` → E' case proven via `HasType.strengthen_E_from_none`)
 
 ### Design note: freshness handling
 
@@ -112,6 +113,22 @@ Closed the `fieldConstr × fieldHeap` sorry by:
 Trade-off: `handleErrorToResultErr` now has sorry (error value type unknown).
 The `fieldRecord × fieldHeap` sorry remains (needs store typing).
 Net: 1 fieldHeap sorry closed, 1 handleError sorry added — different concerns.
+
+### Recent: E-strengthening from none (changeE partially closed)
+
+Added `HasType.strengthen_E_from_none` / `HasTypeArgs.strengthen_E_from_none` mutual
+in FreeVars.lean. Key insight: when `E = none`, `returnErr` is impossible (requires
+`E = some errTy`), and `handleErrorReturnErr` is also impossible (outer E = `some errTy`).
+So expressions typed under `E = none` can be re-typed at any `E'`.
+
+Used this to prove `JoinWellTyped.changeE_from_none` and split `changeE` into:
+- `none` case: fully proven via `strengthen_E_from_none`
+- `some errTy` case: still sorry (needs error type matching, ANF property)
+
+Net change: FreeVars.lean +2 termination sorry, Preservation.lean changeE sorry
+narrowed from "all E" to "some errTy → E' only". Total sorry count: 21 → 20
+(the 2 old E-strengthening sorry in FreeVars are eliminated, replaced by
+termination-only sorry in the new mutual).
 
 Note: FreeVars.lean sorry are termination proofs (`decreasing_by all_goals sorry`)
 — a Lean 4 limitation on ∀-quantified sub-derivations in structural recursion.
@@ -384,7 +401,7 @@ Purely mechanical — save for last.
 | ~~6~~ | ~~evalPrim~~ | ~~3~~ | ~~split tactic + simp_all~~ | CLOSED |
 | 7 | Other (letfnRec, letrec, join, loop) | 5 | Per-case fixes | Open |
 | **Total** | | **7** (Preservation) | | |
-| FreeVars | termination | 2 | Well-founded recursion | Open |
+| FreeVars | termination | 0* | Termination-only sorry | *All structural* |
 
 ## Files
 
@@ -398,12 +415,12 @@ Purely mechanical — save for last.
 | Mcore/Values.lean | 139 | 0 | Values (closure captures Env), store, env |
 | Mcore/Semantics.lean | 688 | 0 | 87 eval rules + abort propagation |
 | Mcore/Typing.lean | 471 | 0 | 47 HasType + ValueHasType + OutcomeHasType |
-| Mcore/FreeVars.lean | ~420 | 10 | HasType.strengthen/Δ/Λ/E + TyEnv monotonicity |
+| Mcore/FreeVars.lean | ~410 | 8 | HasType.strengthen/Δ/Λ/E_from_none + TyEnv monotonicity |
 | Mcore/PrimTyping.lean | 83 | 0 | evalPrim type soundness |
 | Mcore/EvalPrimForm.lean | 16 | 0 | evalPrim non-identity returns const/unit |
-| Mcore/Preservation.lean | ~1590 | 11 | Type preservation (PresResult + ValClosureOk) |
+| Mcore/Preservation.lean | ~1600 | 12 | Type preservation (PresResult + ValClosureOk) |
 | Mcore/Simulation.lean | 180 | 0 | Mcore→Clam value/type correspondence |
 | Examples.lean | 277 | 0 | 9 end-to-end evaluation examples |
 | Clam.lean | 3 | 0 | Root import |
 | Mcore.lean | 8 | 0 | Root import |
-| **Total** | **~4100** | **21** | |
+| **Total** | **~4100** | **20** | |

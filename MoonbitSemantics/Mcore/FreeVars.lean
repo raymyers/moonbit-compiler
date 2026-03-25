@@ -326,4 +326,85 @@ decreasing_by all_goals sorry
 
 end
 
+/-! ## HasType E-strengthening from none
+
+If E = none, expressions have no returnErr, so they can be re-typed at any E'.
+The key insight: `returnErr` requires `E = some errTy`, but `E = none` makes
+this absurd. `function`/`rawFunction`/`letrec` bodies have their own E, so
+they pass through unchanged.
+-/
+
+set_option maxHeartbeats 1600000 in
+set_option maxRecDepth 512 in
+mutual
+
+/-- E-strengthening from none: expressions typed under E=none have no returnErr,
+    so they can be re-typed at any E'. -/
+def HasType.strengthen_E_from_none
+    (h : HasType Γ Δ Λ F none e τ) (E' : Option Mtype) :
+    HasType Γ Δ Λ F E' e τ :=
+  match h with
+  | .const => .const
+  | .unit => .unit
+  | .var hΓ => .var hΓ
+  | .varPrim hΓ => .varPrim hΓ
+  | .let hF h1 h2 => .let hF (h1.strengthen_E_from_none E') (h2.strengthen_E_from_none E')
+  | .function hp hb => .function hp hb  -- body has fresh E (none), unchanged
+  | .rawFunction hp hb => .rawFunction hp hb  -- body has fresh E (none), unchanged
+  | .letfnNonrec hF hp hfn hbd => .letfnNonrec hF hp hfn (hbd.strengthen_E_from_none E')
+  | .letfnRec hF hp hfn hbd => .letfnRec hF hp hfn (hbd.strengthen_E_from_none E')
+  | .letfnTailJoin hp hfn hbd => .letfnTailJoin hp (hfn.strengthen_E_from_none E') (hbd.strengthen_E_from_none E')
+  | .letfnNontailJoin hp hfn hbd => .letfnNontailJoin hp (hfn.strengthen_E_from_none E') (hbd.strengthen_E_from_none E')
+  | .letrec hrec hFnames hFparams hbodies hbody =>
+    .letrec hrec hFnames hFparams
+      (fun i hi => (hbodies i hi))  -- letrec bodies have JoinTyEnv.empty, LoopTyEnv.empty, keep E
+      (hbody.strengthen_E_from_none E')
+  | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_E_from_none E')
+  | .applyRawFn hΓ hargs => .applyRawFn hΓ (hargs.strengthen_E_from_none E')
+  | .applyTopFn hF hargs => .applyTopFn hF (hargs.strengthen_E_from_none E')
+  | .applyJoin hΔ hargs => .applyJoin hΔ (hargs.strengthen_E_from_none E')
+  | .prim hargs hp => .prim (hargs.strengthen_E_from_none E') hp
+  | .constr hargs => .constr (hargs.strengthen_E_from_none E')
+  | .tuple hargs => .tuple (hargs.strengthen_E_from_none E')
+  | .record hargs => .record (hargs.strengthen_E_from_none E')
+  | .recordUpdate hrec hflds => .recordUpdate (hrec.strengthen_E_from_none E') (hflds.strengthen_E_from_none E')
+  | .array hargs => .array (hargs.strengthen_E_from_none E')
+  | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen_E_from_none E') hp
+  | .fieldHeap hrec hp => .fieldHeap (hrec.strengthen_E_from_none E') hp
+  | .mutate hrec hfld => .mutate (hrec.strengthen_E_from_none E') (hfld.strengthen_E_from_none E')
+  | .assign hΓ he => .assign hΓ (he.strengthen_E_from_none E')
+  | .seq hargs hlast => .seq (hargs.strengthen_E_from_none E') (hlast.strengthen_E_from_none E')
+  | .ifSome hc ht hf => .ifSome (hc.strengthen_E_from_none E') (ht.strengthen_E_from_none E') (hf.strengthen_E_from_none E')
+  | .ifNone hc ht => .ifNone (hc.strengthen_E_from_none E') (ht.strengthen_E_from_none E')
+  | .switchConstr hobj hcases hdflt =>
+    .switchConstr (hobj.strengthen_E_from_none E')
+      (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen_E_from_none E')
+      (fun d hd => (hdflt d hd).strengthen_E_from_none E')
+  | .switchConstant hobj hbranches hd =>
+    .switchConstant (hobj.strengthen_E_from_none E') (fun i hi => (hbranches i hi).strengthen_E_from_none E') (hd.strengthen_E_from_none E')
+  | .loop hp hargs hbd => .loop hp (hargs.strengthen_E_from_none E') (hbd.strengthen_E_from_none E')
+  | .break hΛ harg => .break hΛ (harg.strengthen_E_from_none E')
+  | .breakNone hΛ => .breakNone hΛ
+  | .continue hΛ hargs => .continue hΛ (hargs.strengthen_E_from_none E')
+  | .and hl hr => .and (hl.strengthen_E_from_none E') (hr.strengthen_E_from_none E')
+  | .or hl hr => .or (hl.strengthen_E_from_none E') (hr.strengthen_E_from_none E')
+  | .handleErrorToResult h => .handleErrorToResult h  -- inner E fixed to some errTy, outer changes
+  | .handleErrorJoinapply h hΔ => .handleErrorJoinapply h hΔ  -- inner E fixed
+  -- handleErrorReturnErr is impossible: outer E = some errTy contradicts E = none
+  | .returnSingle h => .returnSingle (h.strengthen_E_from_none E')
+  | .returnOk h => .returnOk (h.strengthen_E_from_none E')
+  | .returnErr hE h => nomatch hE  -- E = none ≠ some errTy, so returnErr is impossible!
+  | .object h => .object (h.strengthen_E_from_none E')
+decreasing_by all_goals sorry
+
+def HasTypeArgs.strengthen_E_from_none
+    (h : HasTypeArgs Γ Δ Λ F none es τs) (E' : Option Mtype) :
+    HasTypeArgs Γ Δ Λ F E' es τs :=
+  match h with
+  | .nil => .nil
+  | .cons he hrest => .cons (he.strengthen_E_from_none E') (hrest.strengthen_E_from_none E')
+decreasing_by all_goals sorry
+
+end
+
 end Moonbit.Mcore

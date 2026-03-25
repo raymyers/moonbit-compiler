@@ -783,15 +783,26 @@ theorem JoinWellTyped.weakenΓΛ_loop_anf
     JoinWellTyped jt Δ (TyEnv.bindParams Γ params) (LoopTyEnv.extend Λ label entry) F E :=
   hjwt.weakenΓΛ_loop sorry sorry  -- ANF freshness: Λ label = none, param binders fresh in Γ
 
+/-- Change E from none to any E'. Provable because E=none means no returnErr. -/
+theorem JoinWellTyped.changeE_from_none
+    (hjwt : JoinWellTyped jt Δ Γ Λ F none) :
+    JoinWellTyped jt Δ Γ Λ F E' := by
+  intro func params jbody paramTys retTy hjt' hΔ
+  obtain ⟨hmap, hfp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
+  exact ⟨hmap, hfp, hbody.strengthen_E_from_none E'⟩
+
 /-- Change the E parameter of JoinWellTyped. Sound because E only affects returnErr/handleError
     constructors, and join bodies can be re-typed at any E.
     This is the JoinWellTyped-level analogue of HasType.strengthen_E. -/
 theorem JoinWellTyped.changeE
     (hjwt : JoinWellTyped jt Δ Γ Λ F E) :
     JoinWellTyped jt Δ Γ Λ F E' := by
-  intro func params jbody paramTys retTy hjt' hΔ
-  obtain ⟨hmap, hfp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
-  exact ⟨hmap, hfp, sorry⟩  -- E-strengthening of join body typing
+  cases E with
+  | none => exact hjwt.changeE_from_none
+  | some errTy =>
+    intro func params jbody paramTys retTy hjt' hΔ
+    obtain ⟨hmap, hfp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
+    exact ⟨hmap, hfp, sorry⟩  -- some errTy → E': needs errTy matching (ANF property)
 
 /-- Extend JoinWellTyped with a new tail-join point.
     Uses Δ-monotonicity to lift old body typings to the extended Δ. -/
