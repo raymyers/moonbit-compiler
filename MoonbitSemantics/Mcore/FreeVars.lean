@@ -256,7 +256,7 @@ def HasType.strengthen_Δ
   | .letrec hrec hΓfresh hDistinct hFnames hFparams hbodies hbody =>
     .letrec rfl hΓfresh hDistinct hFnames hFparams
       (fun i hi => hrec ▸ hbodies i hi)
-      ((hrec ▸ hbody).strengthen_Δ hsub hfresh)
+      (hrec ▸ hbody.strengthen_Δ hsub hfresh)
   | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_Δ hsub hfresh)
   | .applyRawFn hΓ hargs => .applyRawFn hΓ (hargs.strengthen_Δ hsub hfresh)
   | .applyTopFn hF hargs => .applyTopFn hF (hargs.strengthen_Δ hsub hfresh)
@@ -293,7 +293,6 @@ def HasType.strengthen_Δ
   | .returnOk h => .returnOk (h.strengthen_Δ hsub hfresh)
   | .returnErr hE h => .returnErr hE (h.strengthen_Δ hsub hfresh)
   | .object h => .object (h.strengthen_Δ hsub hfresh)
-decreasing_by all_goals sorry
 
 def HasTypeArgs.strengthen_Δ
     (h : HasTypeArgs Γ Δ Λ F E es τs)
@@ -303,7 +302,6 @@ def HasTypeArgs.strengthen_Δ
   match h with
   | .nil => .nil
   | .cons he hrest => .cons (he.strengthen_Δ hsub hfresh) (hrest.strengthen_Δ hsub hfresh)
-decreasing_by all_goals sorry
 
 end
 
@@ -367,7 +365,7 @@ def HasType.strengthen_Λ
   | .letrec hrec hΓfresh hDistinct hFnames hFparams hbodies hbody =>
     .letrec rfl hΓfresh hDistinct hFnames hFparams
       (fun i hi => hrec ▸ hbodies i hi)
-      ((hrec ▸ hbody).strengthen_Λ hsub hfresh)
+      (hrec ▸ hbody.strengthen_Λ hsub hfresh)
   | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_Λ hsub hfresh)
   | .applyRawFn hΓ hargs => .applyRawFn hΓ (hargs.strengthen_Λ hsub hfresh)
   | .applyTopFn hF hargs => .applyTopFn hF (hargs.strengthen_Λ hsub hfresh)
@@ -406,7 +404,6 @@ def HasType.strengthen_Λ
   | .returnOk h => .returnOk (h.strengthen_Λ hsub hfresh)
   | .returnErr hE h => .returnErr hE (h.strengthen_Λ hsub hfresh)
   | .object h => .object (h.strengthen_Λ hsub hfresh)
-decreasing_by all_goals sorry
 
 def HasTypeArgs.strengthen_Λ
     (h : HasTypeArgs Γ Δ Λ F E es τs)
@@ -416,7 +413,6 @@ def HasTypeArgs.strengthen_Λ
   match h with
   | .nil => .nil
   | .cons he hrest => .cons (he.strengthen_Λ hsub hfresh) (hrest.strengthen_Λ hsub hfresh)
-decreasing_by all_goals sorry
 
 end
 
