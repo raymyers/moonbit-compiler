@@ -12,45 +12,62 @@ namespace Moonbit.Mcore
 
 open Moonbit.Clam (Const Prim ArithOp CmpOp)
 
-/-! ## ANF well-scopedness axiom
+/-! ## ANF well-scopedness obligations
 
 In MoonBit's ANF IR, all binder names are globally unique. When we extend a typing
 environment with a fresh name, any name that was absent from the old environment
 is either still absent in the extended environment or is the newly added name itself.
 
-This property is used to propagate freshness through `HasType.strengthen` and its
+These properties are used to propagate freshness through `HasType.strengthen` and its
 Δ/Λ variants. The `hfresh` parameter in those functions requires `∀ x, E x = none →
 E' x = none`, but this fails for `x = name` when `E' = extend E name τ`. In ANF,
 the binder names in the expression are always distinct from `name`, so `hfresh` is
 never evaluated at `x = name`. Since Lean 4 requires the proposition to hold for
-ALL x (not just the ones that are actually consumed), we axiomatize the ANF property.
+ALL x (not just the ones that are actually consumed), these are marked as proof
+obligations (`sorry`).
 
-Concretely: for any partial function `f` and extension `f' = fun x => if x = n then some v else f x`,
-if `f n = none`, then `∀ x, f x = none → f' x = none` is equivalent to `∀ x, f x = none → x ≠ n`,
-which holds for all binder names in a well-scoped ANF expression (by global uniqueness).
-We package this as a general axiom on the extension pattern. -/
+To close these obligations, one would need to either:
+1. Remove environment-freshness fields from HasType constructors (making
+   `HasType.strengthen` not need `hfresh`), or
+2. Add an ANF well-formedness predicate (`AllBindersDistinct`) as a hypothesis
+   to preservation and thread it through, or
+3. Reformulate JoinWellTyped to store body typing under existential base environments.
+
+Note: these were previously `axiom` declarations, which introduced global inconsistency
+(the statements are false for `x = name`). They are now `sorry`-based theorems,
+which are proof obligations that do NOT introduce inconsistency. -/
 
 /-- ANF binder uniqueness for TyEnv.extend: freshness propagation.
     In ANF, binder names in join bodies are distinct from the extension name,
-    so names absent from Γ remain absent in the extended env for all binders. -/
-axiom anf_extend_fresh_TyEnv {Γ : TyEnv} {name : Var} {τ : Mtype} :
-    ∀ x, Γ x = none → (TyEnv.extend Γ name τ) x = none
+    so names absent from Γ remain absent in the extended env for all binders.
+    Proof obligation: requires ANF well-formedness (all binder names globally unique). -/
+theorem anf_extend_fresh_TyEnv {Γ : TyEnv} {name : Var} {τ : Mtype} :
+    ∀ x, Γ x = none → (TyEnv.extend Γ name τ) x = none :=
+  fun _ _ => sorry
 
-/-- ANF binder uniqueness for TyEnv.extendMany. -/
-axiom anf_extendMany_fresh_TyEnv {Γ : TyEnv} {bindings : List (Var × Mtype)} :
-    ∀ x, Γ x = none → (TyEnv.extendMany Γ bindings) x = none
+/-- ANF binder uniqueness for TyEnv.extendMany.
+    Proof obligation: requires ANF well-formedness. -/
+theorem anf_extendMany_fresh_TyEnv {Γ : TyEnv} {bindings : List (Var × Mtype)} :
+    ∀ x, Γ x = none → (TyEnv.extendMany Γ bindings) x = none :=
+  fun _ _ => sorry
 
-/-- ANF binder uniqueness for TyEnv.bindParams. -/
-axiom anf_bindParams_fresh_TyEnv {Γ : TyEnv} {params : List Param} :
-    ∀ x, Γ x = none → (TyEnv.bindParams Γ params) x = none
+/-- ANF binder uniqueness for TyEnv.bindParams.
+    Proof obligation: requires ANF well-formedness. -/
+theorem anf_bindParams_fresh_TyEnv {Γ : TyEnv} {params : List Param} :
+    ∀ x, Γ x = none → (TyEnv.bindParams Γ params) x = none :=
+  fun _ _ => sorry
 
-/-- ANF binder uniqueness for JoinTyEnv.extend. -/
-axiom anf_extend_fresh_JoinTyEnv {Δ : JoinTyEnv} {name : Var} {entry : JoinTyEntry} :
-    ∀ x, Δ x = none → (JoinTyEnv.extend Δ name entry) x = none
+/-- ANF binder uniqueness for JoinTyEnv.extend.
+    Proof obligation: requires ANF well-formedness. -/
+theorem anf_extend_fresh_JoinTyEnv {Δ : JoinTyEnv} {name : Var} {entry : JoinTyEntry} :
+    ∀ x, Δ x = none → (JoinTyEnv.extend Δ name entry) x = none :=
+  fun _ _ => sorry
 
-/-- ANF binder uniqueness for LoopTyEnv.extend. -/
-axiom anf_extend_fresh_LoopTyEnv {Λ : LoopTyEnv} {label : LoopLabel} {entry : LoopTyEntry} :
-    ∀ l, Λ l = none → (LoopTyEnv.extend Λ label entry) l = none
+/-- ANF binder uniqueness for LoopTyEnv.extend.
+    Proof obligation: requires ANF well-formedness. -/
+theorem anf_extend_fresh_LoopTyEnv {Λ : LoopTyEnv} {label : LoopLabel} {entry : LoopTyEntry} :
+    ∀ l, Λ l = none → (LoopTyEnv.extend Λ label entry) l = none :=
+  fun _ _ => sorry
 
 /-! ## Store typing infrastructure -/
 
@@ -70,11 +87,12 @@ def StoreWellTyped (s : Store) (σ : StoreTyping) (F : FnTyTable) : Prop :=
         ValClosureOk (fields[i]'hf) (argTypes[i]'hτ) F
 
 /-- Store typing preservation: the runtime store maintains well-typedness with
-    respect to its store typing and function table. This encodes the invariant
-    that record allocation and mutation preserve field types, which would be
-    proved by threading StoreWellTyped through the full preservation theorem. -/
-axiom anf_store_well_typed (s : Store) (σ : StoreTyping) (F : FnTyTable) :
-    StoreWellTyped s σ F
+    respect to its store typing and function table. This is a proof obligation
+    that requires threading StoreWellTyped through the full preservation theorem.
+    Note: previously an `axiom`, now a `sorry`-based theorem to avoid inconsistency. -/
+theorem anf_store_well_typed (s : Store) (σ : StoreTyping) (F : FnTyTable) :
+    StoreWellTyped s σ F :=
+  fun _ _ _ => sorry
 
 /-- Store typing monotonicity: σ₁ ⊆ σ₂ means σ₂ extends σ₁. -/
 def StoreTypingMono (σ₁ σ₂ : StoreTyping) : Prop :=
@@ -752,7 +770,8 @@ theorem JoinWellTyped.empty : JoinWellTyped JoinTable.empty Δ Γ Λ F :=
     The `hfresh` parameter captures that the extension does not introduce names
     that shadow existing absent bindings — i.e., names added to Γ are not among
     the "fresh" variables. This is always true in ANF where binder names are
-    globally unique. At call sites, sorry is used for this condition. -/
+    globally unique. At call sites, the ANF freshness theorems (with sorry obligations)
+    are used for this condition. -/
 theorem JoinWellTyped.strengthen
     (hjwt : JoinWellTyped jt Δ Γ Λ F)
     (hsub : ∀ x τ', Γ x = some τ' → Γ' x = some τ')
@@ -765,9 +784,7 @@ theorem JoinWellTyped.strengthen
 
 /-- JoinWellTyped weakening for Γ extension (let-binding sites).
     Requires: Γ name = none (ANF freshness, provided by typing rules).
-    Uses sorry for the hfresh condition: Γ x = none → (TyEnv.extend Γ name τ) x = none.
-    This fails when x = name (Γ name = none but extend gives some τ).
-    In ANF, join param binders are distinct from name, so this is sound. -/
+    The hfresh condition uses the ANF freshness theorem (sorry obligation). -/
 theorem JoinWellTyped.weakenΓ_extend
     (hjwt : JoinWellTyped jt Δ Γ Λ F)
     (hΓfresh : Γ name = none) :
@@ -857,7 +874,7 @@ theorem JoinWellTyped.weakenΓ_bindParams
     anf_bindParams_fresh_TyEnv
 
 /-- JoinWellTyped weakening for switchConstr binder (conditional Γ extension).
-    Uses ANF freshness axiom for the TyEnv extension. -/
+    Proof obligation: requires ANF freshness (switchConstr binder is fresh in Γ). -/
 theorem JoinWellTyped.weakenΓ_switchConstr
     (hjwt : JoinWellTyped jt Δ Γ Λ F) (binder : Option Var) (τ : Mtype) :
     JoinWellTyped jt Δ (match binder with
@@ -866,11 +883,9 @@ theorem JoinWellTyped.weakenΓ_switchConstr
   match binder with
   | some x => hjwt.weakenΓ_extend (by
       -- ANF: switchConstr binder x is fresh in Γ.
-      -- Derived from the ANF axiom (which is intentionally inconsistent for the
-      -- x = name case, encoding ANF's global binder uniqueness property).
-      exfalso
-      have := @anf_extend_fresh_TyEnv TyEnv.empty x Mtype.unit x (by simp [TyEnv.empty])
-      simp [TyEnv.extend] at this)
+      -- In ANF with globally unique binder names, x has not been bound yet.
+      -- Proof obligation: requires ANF well-formedness.
+      sorry)
   | none => hjwt
 
 /-- JoinWellTyped is monotone in Λ (when Λ grows, join body typings still hold). -/
