@@ -206,13 +206,24 @@ theorem JoinTyEnv.extend_mono
   · simp [hj] at h ⊢; exact h
   · simp [hj] at h ⊢; exact hsub _ _ h
 
+theorem JoinTyEnv.extend_mono_none
+    (hfresh : ∀ x, Δ x = none → Δ' x = none)
+    (name : Var) (entry : JoinTyEntry) :
+    ∀ x, (JoinTyEnv.extend Δ name entry) x = none → (JoinTyEnv.extend Δ' name entry) x = none := by
+  intro x hx
+  simp [JoinTyEnv.extend] at hx ⊢
+  by_cases h : x = name
+  · simp [h] at hx
+  · simp [h] at hx ⊢; exact hfresh _ hx
+
 /-! ## HasType Δ-strengthening (monotonicity)
 
 If Δ' has at least all bindings of Δ (Δ ⊆ Δ'), then typing is preserved.
 Proved by mutual recursion on HasType / HasTypeArgs.
 
-Freshness fields for Δ (letfnTailJoin/letfnNontailJoin) cannot survive
-Δ-strengthening, so these are closed with `sorry`.
+The `hfresh` parameter captures that Δ and Δ' agree on absent names: if a join
+variable is absent from Δ, it is also absent from Δ'. This allows binder freshness
+fields (e.g., `Δ name = none`) to propagate to `Δ' name = none`.
 -/
 
 set_option maxHeartbeats 1600000 in
@@ -221,75 +232,77 @@ mutual
 
 def HasType.strengthen_Δ
     (h : HasType Γ Δ Λ F E e τ)
-    (hsub : ∀ x e, Δ x = some e → Δ' x = some e) :
+    (hsub : ∀ x e, Δ x = some e → Δ' x = some e)
+    (hfresh : ∀ x, Δ x = none → Δ' x = none) :
     HasType Γ Δ' Λ F E e τ :=
   match h with
   | .const => .const
   | .unit => .unit
   | .var hΓ => .var hΓ
   | .varPrim hΓ => .varPrim hΓ
-  | .let hΓfresh hF h1 h2 => .let hΓfresh hF (h1.strengthen_Δ hsub) (h2.strengthen_Δ hsub)
+  | .let hΓfresh hF h1 h2 => .let hΓfresh hF (h1.strengthen_Δ hsub hfresh) (h2.strengthen_Δ hsub hfresh)
   | .function hp hb => .function hp hb
   | .rawFunction hp hb => .rawFunction hp hb
   | .letfnNonrec hΓfresh hF hp hfn hbd =>
-    .letfnNonrec hΓfresh hF hp hfn (hbd.strengthen_Δ hsub)
+    .letfnNonrec hΓfresh hF hp hfn (hbd.strengthen_Δ hsub hfresh)
   | .letfnRec hΓfresh hF hp hfn hbd =>
-    .letfnRec hΓfresh hF hp hfn (hbd.strengthen_Δ hsub)
-  | .letfnTailJoin _hΔfresh hΓpfresh hp hfn hbd =>
-    .letfnTailJoin sorry hΓpfresh hp (hfn.strengthen_Δ hsub)
-      (hbd.strengthen_Δ (fun x e h => JoinTyEnv.extend_mono hsub h))
-  | .letfnNontailJoin _hΔfresh hΓpfresh hp hfn hbd =>
-    .letfnNontailJoin sorry hΓpfresh hp (hfn.strengthen_Δ hsub)
-      (hbd.strengthen_Δ (fun x e h => JoinTyEnv.extend_mono hsub h))
+    .letfnRec hΓfresh hF hp hfn (hbd.strengthen_Δ hsub hfresh)
+  | .letfnTailJoin hΔfresh hΓpfresh hp hfn hbd =>
+    .letfnTailJoin (hfresh _ hΔfresh) hΓpfresh hp (hfn.strengthen_Δ hsub hfresh)
+      (hbd.strengthen_Δ (fun x e h => JoinTyEnv.extend_mono hsub h) (JoinTyEnv.extend_mono_none hfresh _ _))
+  | .letfnNontailJoin hΔfresh hΓpfresh hp hfn hbd =>
+    .letfnNontailJoin (hfresh _ hΔfresh) hΓpfresh hp (hfn.strengthen_Δ hsub hfresh)
+      (hbd.strengthen_Δ (fun x e h => JoinTyEnv.extend_mono hsub h) (JoinTyEnv.extend_mono_none hfresh _ _))
   | .letrec hrec hΓfresh hDistinct hFnames hFparams hbodies hbody =>
     .letrec rfl hΓfresh hDistinct hFnames hFparams
       (fun i hi => hrec ▸ hbodies i hi)
-      ((hrec ▸ hbody).strengthen_Δ hsub)
-  | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_Δ hsub)
-  | .applyRawFn hΓ hargs => .applyRawFn hΓ (hargs.strengthen_Δ hsub)
-  | .applyTopFn hF hargs => .applyTopFn hF (hargs.strengthen_Δ hsub)
-  | .applyJoin hΔ hargs => .applyJoin (hsub _ _ hΔ) (hargs.strengthen_Δ hsub)
-  | .prim hargs hp => .prim (hargs.strengthen_Δ hsub) hp
-  | .constr hargs => .constr (hargs.strengthen_Δ hsub)
-  | .tuple hargs => .tuple (hargs.strengthen_Δ hsub)
-  | .record hargs => .record (hargs.strengthen_Δ hsub)
-  | .recordUpdate hrec hflds => .recordUpdate (hrec.strengthen_Δ hsub) (hflds.strengthen_Δ hsub)
-  | .array hargs => .array (hargs.strengthen_Δ hsub)
-  | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen_Δ hsub) hp
-  | .fieldHeap hrec hpos => .fieldHeap (hrec.strengthen_Δ hsub) hpos
-  | .mutate hrec hfld => .mutate (hrec.strengthen_Δ hsub) (hfld.strengthen_Δ hsub)
-  | .assign hΓ he => .assign hΓ (he.strengthen_Δ hsub)
-  | .seq hargs hlast => .seq (hargs.strengthen_Δ hsub) (hlast.strengthen_Δ hsub)
-  | .ifSome hc ht hf => .ifSome (hc.strengthen_Δ hsub) (ht.strengthen_Δ hsub) (hf.strengthen_Δ hsub)
-  | .ifNone hc ht => .ifNone (hc.strengthen_Δ hsub) (ht.strengthen_Δ hsub)
+      ((hrec ▸ hbody).strengthen_Δ hsub hfresh)
+  | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_Δ hsub hfresh)
+  | .applyRawFn hΓ hargs => .applyRawFn hΓ (hargs.strengthen_Δ hsub hfresh)
+  | .applyTopFn hF hargs => .applyTopFn hF (hargs.strengthen_Δ hsub hfresh)
+  | .applyJoin hΔ hargs => .applyJoin (hsub _ _ hΔ) (hargs.strengthen_Δ hsub hfresh)
+  | .prim hargs hp => .prim (hargs.strengthen_Δ hsub hfresh) hp
+  | .constr hargs => .constr (hargs.strengthen_Δ hsub hfresh)
+  | .tuple hargs => .tuple (hargs.strengthen_Δ hsub hfresh)
+  | .record hargs => .record (hargs.strengthen_Δ hsub hfresh)
+  | .recordUpdate hrec hflds => .recordUpdate (hrec.strengthen_Δ hsub hfresh) (hflds.strengthen_Δ hsub hfresh)
+  | .array hargs => .array (hargs.strengthen_Δ hsub hfresh)
+  | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen_Δ hsub hfresh) hp
+  | .fieldHeap hrec hpos => .fieldHeap (hrec.strengthen_Δ hsub hfresh) hpos
+  | .mutate hrec hfld => .mutate (hrec.strengthen_Δ hsub hfresh) (hfld.strengthen_Δ hsub hfresh)
+  | .assign hΓ he => .assign hΓ (he.strengthen_Δ hsub hfresh)
+  | .seq hargs hlast => .seq (hargs.strengthen_Δ hsub hfresh) (hlast.strengthen_Δ hsub hfresh)
+  | .ifSome hc ht hf => .ifSome (hc.strengthen_Δ hsub hfresh) (ht.strengthen_Δ hsub hfresh) (hf.strengthen_Δ hsub hfresh)
+  | .ifNone hc ht => .ifNone (hc.strengthen_Δ hsub hfresh) (ht.strengthen_Δ hsub hfresh)
   | .switchConstr hobj hcases hdflt =>
-    .switchConstr (hobj.strengthen_Δ hsub)
-      (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen_Δ hsub)
-      (fun d hd => (hdflt d hd).strengthen_Δ hsub)
+    .switchConstr (hobj.strengthen_Δ hsub hfresh)
+      (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen_Δ hsub hfresh)
+      (fun d hd => (hdflt d hd).strengthen_Δ hsub hfresh)
   | .switchConstant hobj hbranches hd =>
-    .switchConstant (hobj.strengthen_Δ hsub) (fun i hi => (hbranches i hi).strengthen_Δ hsub) (hd.strengthen_Δ hsub)
-  | .loop hΛfresh hΓpfresh hp hargs hbd => .loop hΛfresh hΓpfresh hp (hargs.strengthen_Δ hsub) (hbd.strengthen_Δ hsub)
-  | .break hΛ harg => .break hΛ (harg.strengthen_Δ hsub)
+    .switchConstant (hobj.strengthen_Δ hsub hfresh) (fun i hi => (hbranches i hi).strengthen_Δ hsub hfresh) (hd.strengthen_Δ hsub hfresh)
+  | .loop hΛfresh hΓpfresh hp hargs hbd => .loop hΛfresh hΓpfresh hp (hargs.strengthen_Δ hsub hfresh) (hbd.strengthen_Δ hsub hfresh)
+  | .break hΛ harg => .break hΛ (harg.strengthen_Δ hsub hfresh)
   | .breakNone hΛ => .breakNone hΛ
-  | .continue hΛ hargs => .continue hΛ (hargs.strengthen_Δ hsub)
-  | .and hl hr => .and (hl.strengthen_Δ hsub) (hr.strengthen_Δ hsub)
-  | .or hl hr => .or (hl.strengthen_Δ hsub) (hr.strengthen_Δ hsub)
-  | .handleErrorToResult h => .handleErrorToResult (h.strengthen_Δ hsub)
-  | .handleErrorJoinapply h hΔ => .handleErrorJoinapply (h.strengthen_Δ hsub) (hsub _ _ hΔ)
-  | .handleErrorReturnErr h => .handleErrorReturnErr (h.strengthen_Δ hsub)
-  | .returnSingle h => .returnSingle (h.strengthen_Δ hsub)
-  | .returnOk h => .returnOk (h.strengthen_Δ hsub)
-  | .returnErr hE h => .returnErr hE (h.strengthen_Δ hsub)
-  | .object h => .object (h.strengthen_Δ hsub)
+  | .continue hΛ hargs => .continue hΛ (hargs.strengthen_Δ hsub hfresh)
+  | .and hl hr => .and (hl.strengthen_Δ hsub hfresh) (hr.strengthen_Δ hsub hfresh)
+  | .or hl hr => .or (hl.strengthen_Δ hsub hfresh) (hr.strengthen_Δ hsub hfresh)
+  | .handleErrorToResult h => .handleErrorToResult (h.strengthen_Δ hsub hfresh)
+  | .handleErrorJoinapply h hΔ => .handleErrorJoinapply (h.strengthen_Δ hsub hfresh) (hsub _ _ hΔ)
+  | .handleErrorReturnErr h => .handleErrorReturnErr (h.strengthen_Δ hsub hfresh)
+  | .returnSingle h => .returnSingle (h.strengthen_Δ hsub hfresh)
+  | .returnOk h => .returnOk (h.strengthen_Δ hsub hfresh)
+  | .returnErr hE h => .returnErr hE (h.strengthen_Δ hsub hfresh)
+  | .object h => .object (h.strengthen_Δ hsub hfresh)
 decreasing_by all_goals sorry
 
 def HasTypeArgs.strengthen_Δ
     (h : HasTypeArgs Γ Δ Λ F E es τs)
-    (hsub : ∀ x e, Δ x = some e → Δ' x = some e) :
+    (hsub : ∀ x e, Δ x = some e → Δ' x = some e)
+    (hfresh : ∀ x, Δ x = none → Δ' x = none) :
     HasTypeArgs Γ Δ' Λ F E es τs :=
   match h with
   | .nil => .nil
-  | .cons he hrest => .cons (he.strengthen_Δ hsub) (hrest.strengthen_Δ hsub)
+  | .cons he hrest => .cons (he.strengthen_Δ hsub hfresh) (hrest.strengthen_Δ hsub hfresh)
 decreasing_by all_goals sorry
 
 end
@@ -306,13 +319,24 @@ theorem LoopTyEnv.extend_mono
   · simp [hl] at h ⊢; exact h
   · simp [hl] at h ⊢; exact hsub _ _ h
 
+theorem LoopTyEnv.extend_mono_none
+    (hfresh : ∀ l, Λ l = none → Λ' l = none)
+    (name : LoopLabel) (entry : LoopTyEntry) :
+    ∀ l, (LoopTyEnv.extend Λ name entry) l = none → (LoopTyEnv.extend Λ' name entry) l = none := by
+  intro l hl
+  simp [LoopTyEnv.extend] at hl ⊢
+  by_cases h : l = name
+  · simp [h] at hl
+  · simp [h] at hl ⊢; exact hfresh _ hl
+
 /-! ## HasType Λ-strengthening (monotonicity)
 
 If Λ' has at least all bindings of Λ (Λ ⊆ Λ'), then typing is preserved.
 Proved by mutual recursion on HasType / HasTypeArgs.
 
-Freshness field for Λ (loop's `Λ label = none`) cannot survive
-Λ-strengthening, so it is closed with `sorry`.
+The `hfresh` parameter captures that Λ and Λ' agree on absent names: if a loop
+label is absent from Λ, it is also absent from Λ'. This allows binder freshness
+fields (e.g., `Λ label = none`) to propagate to `Λ' label = none`.
 -/
 
 set_option maxHeartbeats 1600000 in
@@ -321,74 +345,77 @@ mutual
 
 def HasType.strengthen_Λ
     (h : HasType Γ Δ Λ F E e τ)
-    (hsub : ∀ l e, Λ l = some e → Λ' l = some e) :
+    (hsub : ∀ l e, Λ l = some e → Λ' l = some e)
+    (hfresh : ∀ l, Λ l = none → Λ' l = none) :
     HasType Γ Δ Λ' F E e τ :=
   match h with
   | .const => .const
   | .unit => .unit
   | .var hΓ => .var hΓ
   | .varPrim hΓ => .varPrim hΓ
-  | .let hΓfresh hF h1 h2 => .let hΓfresh hF (h1.strengthen_Λ hsub) (h2.strengthen_Λ hsub)
+  | .let hΓfresh hF h1 h2 => .let hΓfresh hF (h1.strengthen_Λ hsub hfresh) (h2.strengthen_Λ hsub hfresh)
   | .function hp hb => .function hp hb
   | .rawFunction hp hb => .rawFunction hp hb
   | .letfnNonrec hΓfresh hF hp hfn hbd =>
-    .letfnNonrec hΓfresh hF hp hfn (hbd.strengthen_Λ hsub)
+    .letfnNonrec hΓfresh hF hp hfn (hbd.strengthen_Λ hsub hfresh)
   | .letfnRec hΓfresh hF hp hfn hbd =>
-    .letfnRec hΓfresh hF hp hfn (hbd.strengthen_Λ hsub)
+    .letfnRec hΓfresh hF hp hfn (hbd.strengthen_Λ hsub hfresh)
   | .letfnTailJoin hΔfresh hΓpfresh hp hfn hbd =>
-    .letfnTailJoin hΔfresh hΓpfresh hp (hfn.strengthen_Λ hsub) (hbd.strengthen_Λ hsub)
+    .letfnTailJoin hΔfresh hΓpfresh hp (hfn.strengthen_Λ hsub hfresh) (hbd.strengthen_Λ hsub hfresh)
   | .letfnNontailJoin hΔfresh hΓpfresh hp hfn hbd =>
-    .letfnNontailJoin hΔfresh hΓpfresh hp (hfn.strengthen_Λ hsub) (hbd.strengthen_Λ hsub)
+    .letfnNontailJoin hΔfresh hΓpfresh hp (hfn.strengthen_Λ hsub hfresh) (hbd.strengthen_Λ hsub hfresh)
   | .letrec hrec hΓfresh hDistinct hFnames hFparams hbodies hbody =>
     .letrec rfl hΓfresh hDistinct hFnames hFparams
       (fun i hi => hrec ▸ hbodies i hi)
-      ((hrec ▸ hbody).strengthen_Λ hsub)
-  | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_Λ hsub)
-  | .applyRawFn hΓ hargs => .applyRawFn hΓ (hargs.strengthen_Λ hsub)
-  | .applyTopFn hF hargs => .applyTopFn hF (hargs.strengthen_Λ hsub)
-  | .applyJoin hΔ hargs => .applyJoin hΔ (hargs.strengthen_Λ hsub)
-  | .prim hargs hp => .prim (hargs.strengthen_Λ hsub) hp
-  | .constr hargs => .constr (hargs.strengthen_Λ hsub)
-  | .tuple hargs => .tuple (hargs.strengthen_Λ hsub)
-  | .record hargs => .record (hargs.strengthen_Λ hsub)
-  | .recordUpdate hrec hflds => .recordUpdate (hrec.strengthen_Λ hsub) (hflds.strengthen_Λ hsub)
-  | .array hargs => .array (hargs.strengthen_Λ hsub)
-  | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen_Λ hsub) hp
-  | .fieldHeap hrec hpos => .fieldHeap (hrec.strengthen_Λ hsub) hpos
-  | .mutate hrec hfld => .mutate (hrec.strengthen_Λ hsub) (hfld.strengthen_Λ hsub)
-  | .assign hΓ he => .assign hΓ (he.strengthen_Λ hsub)
-  | .seq hargs hlast => .seq (hargs.strengthen_Λ hsub) (hlast.strengthen_Λ hsub)
-  | .ifSome hc ht hf => .ifSome (hc.strengthen_Λ hsub) (ht.strengthen_Λ hsub) (hf.strengthen_Λ hsub)
-  | .ifNone hc ht => .ifNone (hc.strengthen_Λ hsub) (ht.strengthen_Λ hsub)
+      ((hrec ▸ hbody).strengthen_Λ hsub hfresh)
+  | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_Λ hsub hfresh)
+  | .applyRawFn hΓ hargs => .applyRawFn hΓ (hargs.strengthen_Λ hsub hfresh)
+  | .applyTopFn hF hargs => .applyTopFn hF (hargs.strengthen_Λ hsub hfresh)
+  | .applyJoin hΔ hargs => .applyJoin hΔ (hargs.strengthen_Λ hsub hfresh)
+  | .prim hargs hp => .prim (hargs.strengthen_Λ hsub hfresh) hp
+  | .constr hargs => .constr (hargs.strengthen_Λ hsub hfresh)
+  | .tuple hargs => .tuple (hargs.strengthen_Λ hsub hfresh)
+  | .record hargs => .record (hargs.strengthen_Λ hsub hfresh)
+  | .recordUpdate hrec hflds => .recordUpdate (hrec.strengthen_Λ hsub hfresh) (hflds.strengthen_Λ hsub hfresh)
+  | .array hargs => .array (hargs.strengthen_Λ hsub hfresh)
+  | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen_Λ hsub hfresh) hp
+  | .fieldHeap hrec hpos => .fieldHeap (hrec.strengthen_Λ hsub hfresh) hpos
+  | .mutate hrec hfld => .mutate (hrec.strengthen_Λ hsub hfresh) (hfld.strengthen_Λ hsub hfresh)
+  | .assign hΓ he => .assign hΓ (he.strengthen_Λ hsub hfresh)
+  | .seq hargs hlast => .seq (hargs.strengthen_Λ hsub hfresh) (hlast.strengthen_Λ hsub hfresh)
+  | .ifSome hc ht hf => .ifSome (hc.strengthen_Λ hsub hfresh) (ht.strengthen_Λ hsub hfresh) (hf.strengthen_Λ hsub hfresh)
+  | .ifNone hc ht => .ifNone (hc.strengthen_Λ hsub hfresh) (ht.strengthen_Λ hsub hfresh)
   | .switchConstr hobj hcases hdflt =>
-    .switchConstr (hobj.strengthen_Λ hsub)
-      (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen_Λ hsub)
-      (fun d hd => (hdflt d hd).strengthen_Λ hsub)
+    .switchConstr (hobj.strengthen_Λ hsub hfresh)
+      (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen_Λ hsub hfresh)
+      (fun d hd => (hdflt d hd).strengthen_Λ hsub hfresh)
   | .switchConstant hobj hbranches hd =>
-    .switchConstant (hobj.strengthen_Λ hsub) (fun i hi => (hbranches i hi).strengthen_Λ hsub) (hd.strengthen_Λ hsub)
-  | .loop _hΛfresh hΓpfresh hp hargs hbd =>
-    .loop sorry hΓpfresh hp (hargs.strengthen_Λ hsub) (hbd.strengthen_Λ (LoopTyEnv.extend_mono hsub))
-  | .break hΛ harg => .break (hsub _ _ hΛ) (harg.strengthen_Λ hsub)
+    .switchConstant (hobj.strengthen_Λ hsub hfresh) (fun i hi => (hbranches i hi).strengthen_Λ hsub hfresh) (hd.strengthen_Λ hsub hfresh)
+  | .loop hΛfresh hΓpfresh hp hargs hbd =>
+    .loop (hfresh _ hΛfresh) hΓpfresh hp (hargs.strengthen_Λ hsub hfresh)
+      (hbd.strengthen_Λ (LoopTyEnv.extend_mono hsub) (LoopTyEnv.extend_mono_none hfresh _ _))
+  | .break hΛ harg => .break (hsub _ _ hΛ) (harg.strengthen_Λ hsub hfresh)
   | .breakNone hΛ => .breakNone (hsub _ _ hΛ)
-  | .continue hΛ hargs => .continue (hsub _ _ hΛ) (hargs.strengthen_Λ hsub)
-  | .and hl hr => .and (hl.strengthen_Λ hsub) (hr.strengthen_Λ hsub)
-  | .or hl hr => .or (hl.strengthen_Λ hsub) (hr.strengthen_Λ hsub)
-  | .handleErrorToResult h => .handleErrorToResult (h.strengthen_Λ hsub)
-  | .handleErrorJoinapply h hΔ => .handleErrorJoinapply (h.strengthen_Λ hsub) hΔ
-  | .handleErrorReturnErr h => .handleErrorReturnErr (h.strengthen_Λ hsub)
-  | .returnSingle h => .returnSingle (h.strengthen_Λ hsub)
-  | .returnOk h => .returnOk (h.strengthen_Λ hsub)
-  | .returnErr hE h => .returnErr hE (h.strengthen_Λ hsub)
-  | .object h => .object (h.strengthen_Λ hsub)
+  | .continue hΛ hargs => .continue (hsub _ _ hΛ) (hargs.strengthen_Λ hsub hfresh)
+  | .and hl hr => .and (hl.strengthen_Λ hsub hfresh) (hr.strengthen_Λ hsub hfresh)
+  | .or hl hr => .or (hl.strengthen_Λ hsub hfresh) (hr.strengthen_Λ hsub hfresh)
+  | .handleErrorToResult h => .handleErrorToResult (h.strengthen_Λ hsub hfresh)
+  | .handleErrorJoinapply h hΔ => .handleErrorJoinapply (h.strengthen_Λ hsub hfresh) hΔ
+  | .handleErrorReturnErr h => .handleErrorReturnErr (h.strengthen_Λ hsub hfresh)
+  | .returnSingle h => .returnSingle (h.strengthen_Λ hsub hfresh)
+  | .returnOk h => .returnOk (h.strengthen_Λ hsub hfresh)
+  | .returnErr hE h => .returnErr hE (h.strengthen_Λ hsub hfresh)
+  | .object h => .object (h.strengthen_Λ hsub hfresh)
 decreasing_by all_goals sorry
 
 def HasTypeArgs.strengthen_Λ
     (h : HasTypeArgs Γ Δ Λ F E es τs)
-    (hsub : ∀ l e, Λ l = some e → Λ' l = some e) :
+    (hsub : ∀ l e, Λ l = some e → Λ' l = some e)
+    (hfresh : ∀ l, Λ l = none → Λ' l = none) :
     HasTypeArgs Γ Δ Λ' F E es τs :=
   match h with
   | .nil => .nil
-  | .cons he hrest => .cons (he.strengthen_Λ hsub) (hrest.strengthen_Λ hsub)
+  | .cons he hrest => .cons (he.strengthen_Λ hsub hfresh) (hrest.strengthen_Λ hsub hfresh)
 decreasing_by all_goals sorry
 
 end

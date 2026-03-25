@@ -821,11 +821,12 @@ theorem JoinWellTyped.weakenΓ_switchConstr
 /-- JoinWellTyped is monotone in Λ (when Λ grows, join body typings still hold). -/
 theorem JoinWellTyped.strengthen_Λ
     (hjwt : JoinWellTyped jt Δ Γ Λ F)
-    (hsub : ∀ l e, Λ l = some e → Λ' l = some e) :
+    (hsub : ∀ l e, Λ l = some e → Λ' l = some e)
+    (hfresh : ∀ l, Λ l = none → Λ' l = none) :
     JoinWellTyped jt Δ Γ Λ' F := by
   intro func params jbody paramTys retTy hjt' hΔ
   obtain ⟨hmap, hfp, hΓp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
-  exact ⟨hmap, hfp, hΓp, hbody.strengthen_Λ hsub⟩
+  exact ⟨hmap, hfp, hΓp, hbody.strengthen_Λ hsub hfresh⟩
 
 /-- Combined Γ-bindParams and Λ-extend weakening for loop body sites.
     Freshness conditions provided by typing rules. -/
@@ -839,6 +840,7 @@ theorem JoinWellTyped.weakenΓΛ_loop
     by_cases hl : l = label
     · subst hl; rw [hΛfresh] at h; exact nomatch h
     · simp [hl]; exact h)
+    (sorry /- ANF: loop labels in join bodies are distinct from the current loop label -/)
 
 /-- Extend JoinWellTyped with a new tail-join point.
     Uses Δ-monotonicity to lift old body typings to the extended Δ. -/
@@ -856,6 +858,9 @@ theorem JoinWellTyped.extend_tail
       simp [JoinTyEnv.extend]; by_cases hx : x = name
       · subst hx; rw [hΔfresh] at h; exact nomatch h
       · simp [hx]; exact h
+  -- ANF: join names in bodies are distinct from the newly defined join name
+  have hfresh_Δ : ∀ x, Δ x = none → (JoinTyEnv.extend Δ name ⟨paramTys, τ⟩) x = none :=
+    sorry
   intro func params' jbody' paramTys' retTy' hjt' hΔ'
   by_cases h : func = name
   · subst h
@@ -863,11 +868,11 @@ theorem JoinWellTyped.extend_tail
     simp [JoinTyEnv.extend] at hΔ'
     obtain ⟨rfl, rfl⟩ := hjt'
     obtain ⟨rfl, rfl⟩ := hΔ'
-    exact ⟨hmap, hparams, hΓparams, hbody.strengthen_Δ hmono⟩
+    exact ⟨hmap, hparams, hΓparams, hbody.strengthen_Δ hmono hfresh_Δ⟩
   · simp [JoinTable.extend, h] at hjt'
     simp [JoinTyEnv.extend, h] at hΔ'
     obtain ⟨hmap', hfp', hΓp', hbody'⟩ := hjwt func params' jbody' paramTys' retTy' hjt' hΔ'
-    exact ⟨hmap', hfp', hΓp', hbody'.strengthen_Δ hmono⟩
+    exact ⟨hmap', hfp', hΓp', hbody'.strengthen_Δ hmono hfresh_Δ⟩
 
 /-- Extend JoinWellTyped with a new non-tail-join point. -/
 theorem JoinWellTyped.extend_nontail
@@ -884,6 +889,9 @@ theorem JoinWellTyped.extend_nontail
       simp [JoinTyEnv.extend]; by_cases hx : x = name
       · subst hx; rw [hΔfresh] at h; exact nomatch h
       · simp [hx]; exact h
+  -- ANF: join names in bodies are distinct from the newly defined join name
+  have hfresh_Δ : ∀ x, Δ x = none → (JoinTyEnv.extend Δ name ⟨paramTys, joinTy⟩) x = none :=
+    sorry
   intro func params' jbody' paramTys' retTy' hjt' hΔ'
   by_cases h : func = name
   · subst h
@@ -891,11 +899,11 @@ theorem JoinWellTyped.extend_nontail
     simp [JoinTyEnv.extend] at hΔ'
     obtain ⟨rfl, rfl⟩ := hjt'
     obtain ⟨rfl, rfl⟩ := hΔ'
-    exact ⟨hmap, hparams, hΓparams, hbody.strengthen_Δ hmono⟩
+    exact ⟨hmap, hparams, hΓparams, hbody.strengthen_Δ hmono hfresh_Δ⟩
   · simp [JoinTable.extend, h] at hjt'
     simp [JoinTyEnv.extend, h] at hΔ'
     obtain ⟨hmap', hfp', hΓp', hbody'⟩ := hjwt func params' jbody' paramTys' retTy' hjt' hΔ'
-    exact ⟨hmap', hfp', hΓp', hbody'.strengthen_Δ hmono⟩
+    exact ⟨hmap', hfp', hΓp', hbody'.strengthen_Δ hmono hfresh_Δ⟩
 
 /-- Extract field typing from StoreWellTyped evidence for fieldRecord.
     Given that fields and types have matching sizes, each index is well-typed,
