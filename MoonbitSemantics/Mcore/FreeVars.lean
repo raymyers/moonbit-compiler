@@ -448,9 +448,9 @@ def HasType.strengthen_E_from_none
   | .letfnTailJoin hΔfresh hΓpfresh hp hfn hbd => .letfnTailJoin hΔfresh hΓpfresh hp hfn (hbd.strengthen_E_from_none E')
   | .letfnNontailJoin hΔfresh hΓpfresh hp hfn hbd => .letfnNontailJoin hΔfresh hΓpfresh hp hfn (hbd.strengthen_E_from_none E')
   | .letrec hrec hΓfresh hDistinct hFnames hFparams hbodies hbody =>
-    .letrec hrec hΓfresh hDistinct hFnames hFparams
-      (fun i hi => (hbodies i hi))  -- letrec bodies have JoinTyEnv.empty, LoopTyEnv.empty, keep E
-      (hbody.strengthen_E_from_none E')
+    .letrec rfl hΓfresh hDistinct hFnames hFparams
+      (fun i hi => hrec ▸ hbodies i hi)
+      (hrec ▸ hbody.strengthen_E_from_none E')
   | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_E_from_none E')
   | .applyRawFn hΓ hargs => .applyRawFn hΓ (hargs.strengthen_E_from_none E')
   | .applyTopFn hF hargs => .applyTopFn hF (hargs.strengthen_E_from_none E')
