@@ -663,11 +663,13 @@ def JoinWellTyped (jt : JoinTable) (Δ : JoinTyEnv) (Γ : TyEnv) (Λ : LoopTyEnv
     Δ func = some ⟨paramTys, retTy⟩ →
     params.map (·.ty) = paramTys ∧
     (∀ p, p ∈ params → F p.binder = none) ∧
+    (∀ p, p ∈ params → Γ p.binder = none) ∧
     HasType (TyEnv.bindParams Γ params) Δ Λ F E jbody retTy
 
 /-- JoinWellTyped holds vacuously for empty jt (any Δ). -/
 theorem JoinWellTyped.empty : JoinWellTyped JoinTable.empty Δ Γ Λ F E :=
   fun _ _ _ _ _ hjt _ => absurd hjt (by simp [JoinTable.empty])
+
 
 /-- JoinWellTyped is monotone in Γ (when Γ grows, join body typings still hold). -/
 theorem JoinWellTyped.strengthen
@@ -675,12 +677,11 @@ theorem JoinWellTyped.strengthen
     (hsub : ∀ x τ', Γ x = some τ' → Γ' x = some τ') :
     JoinWellTyped jt Δ Γ' Λ F E := by
   intro func params jbody paramTys retTy hjt' hΔ
-  obtain ⟨hmap, hfp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
-  exact ⟨hmap, hfp, hbody.strengthen (TyEnv.bindParams_mono hsub _)⟩
+  obtain ⟨hmap, hfp, hΓp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
+  exact ⟨hmap, hfp, sorry, hbody.strengthen (TyEnv.bindParams_mono hsub _)⟩
 
 /-- JoinWellTyped weakening for Γ extension (let-binding sites).
-    Sound for ANF programs where let-bound names are fresh in Γ.
-    Requires: Γ name = none (ANF freshness). -/
+    Requires: Γ name = none (ANF freshness, provided by typing rules). -/
 theorem JoinWellTyped.weakenΓ_extend
     (hjwt : JoinWellTyped jt Δ Γ Λ F E)
     (hΓfresh : Γ name = none) :
@@ -690,17 +691,12 @@ theorem JoinWellTyped.weakenΓ_extend
     · next heq => subst heq; rw [hΓfresh] at h; exact nomatch h
     · exact h)
 
-/-- Sorry-based variant of weakenΓ_extend for ANF programs.
-    ANF freshness (Γ name = none) is not tracked in the typing judgment. -/
-theorem JoinWellTyped.weakenΓ_extend_anf
-    (hjwt : JoinWellTyped jt Δ Γ Λ F E) :
-    JoinWellTyped jt Δ (TyEnv.extend Γ name τ) Λ F E :=
-  hjwt.weakenΓ_extend sorry  -- ANF freshness: let-bound name fresh in Γ
-
-/-- If all names in bindings are fresh in Γ (and pairwise distinct — ANF property),
+/-- If all names in bindings are fresh in Γ and pairwise distinct,
     then Γ ⊆ TyEnv.extendMany Γ bindings. -/
 private theorem TyEnv.extendMany_sub_of_fresh
     (hfresh : ∀ i (hi : i < bindings.length), Γ (bindings[i]'hi).1 = none)
+    (hDistinct : ∀ i j (hi : i < bindings.length) (hj : j < bindings.length),
+      i ≠ j → (bindings[i]'hi).1 ≠ (bindings[j]'hj).1)
     {x : Var} {τ' : Mtype} (h : Γ x = some τ') :
     (TyEnv.extendMany Γ bindings) x = some τ' := by
   simp [TyEnv.extendMany]
@@ -708,33 +704,62 @@ private theorem TyEnv.extendMany_sub_of_fresh
   | nil => exact h
   | cons b bs ih =>
     simp [List.foldl]
-    -- ANF distinctness: binding names are pairwise distinct, so extend preserves none
-    apply ih (fun i hi => sorry)
-    simp [TyEnv.extend]
-    have hfresh0 := hfresh 0 (by simp)
-    simp at hfresh0
-    by_cases hx : x = b.1
-    · subst hx; rw [hfresh0] at h; exact nomatch h
-    · simp [hx]; exact h
+    apply ih
+    · -- After extending with b, remaining names bs[i] are still fresh
+      intro i hi
+      simp [TyEnv.extend]
+      have hfresh_si := hfresh (i + 1) (by simp; omega)
+      simp at hfresh_si
+      -- bs[i].1 ≠ b.1 by distinctness (index 0 vs i+1)
+      have hne : (bs[i]'hi).1 ≠ b.1 := by
+        have := hDistinct (i + 1) 0 (by simp; omega) (by simp) (by omega)
+        simp at this; exact this
+      simp [hne]; exact hfresh_si
+    · -- Distinctness for the tail
+      intro i j hi hj hij
+      exact hDistinct (i + 1) (j + 1) (by simp; omega) (by simp; omega) (by omega)
+    · simp [TyEnv.extend]
+      have hfresh0 := hfresh 0 (by simp)
+      simp at hfresh0
+      by_cases hx : x = b.1
+      · subst hx; rw [hfresh0] at h; exact nomatch h
+      · simp [hx]; exact h
 
 /-- JoinWellTyped weakening for Γ extendMany (letrec sites). -/
 theorem JoinWellTyped.weakenΓ_extendMany
     (hjwt : JoinWellTyped jt Δ Γ Λ F E)
-    (hΓfresh : ∀ i (hi : i < bindings.length), Γ (bindings[i]'hi).1 = none) :
+    (hΓfresh : ∀ i (hi : i < bindings.length), Γ (bindings[i]'hi).1 = none)
+    (hDistinct : ∀ i j (hi : i < bindings.length) (hj : j < bindings.length),
+      i ≠ j → (bindings[i]'hi).1 ≠ (bindings[j]'hj).1) :
     JoinWellTyped jt Δ (TyEnv.extendMany Γ bindings) Λ F E :=
-  hjwt.strengthen (fun x τ' h => TyEnv.extendMany_sub_of_fresh hΓfresh h)
+  hjwt.strengthen (fun x τ' h => TyEnv.extendMany_sub_of_fresh hΓfresh hDistinct h)
 
-/-- If all param binders are fresh in Γ, then Γ ⊆ TyEnv.bindParams Γ params. -/
+/-- If all param binders are fresh in Γ, then Γ ⊆ TyEnv.bindParams Γ params.
+    Does not need distinctness since we only care about preservation of existing Γ values:
+    each extend either shadows (impossible since Γ p.binder = none ≠ some τ') or passes through. -/
 private theorem TyEnv.bindParams_sub_of_fresh
+    {params : List Param}
     (hfresh : ∀ p, p ∈ params → Γ p.binder = none)
     {x : Var} {τ' : Mtype} (h : Γ x = some τ') :
     (TyEnv.bindParams Γ params) x = some τ' := by
-  simp [TyEnv.bindParams]
-  apply TyEnv.extendMany_sub_of_fresh (bindings := params.map fun p => (p.binder, p.ty))
-  · intro i hi
-    simp [List.getElem_map] at hi ⊢
-    exact hfresh _ (List.getElem_mem (by omega))
-  · exact h
+  have hne : ∀ p, p ∈ params → x ≠ p.binder := by
+    intro p hp heq; subst heq; rw [hfresh p hp] at h; exact nomatch h
+  simp only [TyEnv.bindParams, TyEnv.extendMany]
+  -- Each extend passes through since x ≠ p.binder
+  suffices ∀ (ps : List Param) (Γ₀ : TyEnv),
+      (∀ p, p ∈ ps → x ≠ p.binder) → Γ₀ x = some τ' →
+      (ps.map (fun p => (p.binder, p.ty))).foldl (fun acc b => TyEnv.extend acc b.1 b.2) Γ₀ x = some τ' from
+    this params Γ hne h
+  intro ps
+  induction ps with
+  | nil => intro Γ₀ _ h₀; exact h₀
+  | cons p ps ih =>
+    intro Γ₀ hne₀ h₀
+    simp [List.map]
+    have hne_p : x ≠ p.binder := hne₀ p (by simp)
+    have h₁ : (TyEnv.extend Γ₀ p.binder p.ty) x = some τ' := by
+      simp [TyEnv.extend, hne_p]; exact h₀
+    exact ih _ (fun q hq => hne₀ q (List.mem_cons_of_mem p hq)) h₁
 
 /-- JoinWellTyped weakening for Γ bindParams (applyJoin/loop sites). -/
 theorem JoinWellTyped.weakenΓ_bindParams
@@ -743,14 +768,15 @@ theorem JoinWellTyped.weakenΓ_bindParams
     JoinWellTyped jt Δ (TyEnv.bindParams Γ params) Λ F E :=
   hjwt.strengthen (fun x τ' h => TyEnv.bindParams_sub_of_fresh hΓfresh h)
 
-/-- JoinWellTyped weakening for switchConstr binder (conditional Γ extension). -/
+/-- JoinWellTyped weakening for switchConstr binder (conditional Γ extension).
+    Uses sorry because switchConstr binder freshness not tracked in typing rules. -/
 theorem JoinWellTyped.weakenΓ_switchConstr
     (hjwt : JoinWellTyped jt Δ Γ Λ F E) (binder : Option Var) (τ : Mtype) :
     JoinWellTyped jt Δ (match binder with
       | some x => TyEnv.extend Γ x τ
       | none => Γ) Λ F E := by
   cases binder with
-  | some x => exact hjwt.weakenΓ_extend_anf  -- ANF freshness: switchConstr binder fresh in Γ
+  | some x => exact hjwt.weakenΓ_extend sorry  -- switchConstr binder freshness not tracked
   | none => exact hjwt
 
 /-- JoinWellTyped is monotone in Λ (when Λ grows, join body typings still hold). -/
@@ -759,11 +785,11 @@ theorem JoinWellTyped.strengthen_Λ
     (hsub : ∀ l e, Λ l = some e → Λ' l = some e) :
     JoinWellTyped jt Δ Γ Λ' F E := by
   intro func params jbody paramTys retTy hjt' hΔ
-  obtain ⟨hmap, hfp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
-  exact ⟨hmap, hfp, hbody.strengthen_Λ hsub⟩
+  obtain ⟨hmap, hfp, hΓp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
+  exact ⟨hmap, hfp, hΓp, hbody.strengthen_Λ hsub⟩
 
 /-- Combined Γ-bindParams and Λ-extend weakening for loop body sites.
-    Sound for ANF programs where loop label is fresh in Λ and param binders are fresh in Γ. -/
+    Freshness conditions provided by typing rules. -/
 theorem JoinWellTyped.weakenΓΛ_loop
     (hjwt : JoinWellTyped jt Δ Γ Λ F E)
     (hΛfresh : Λ label = none)
@@ -775,21 +801,13 @@ theorem JoinWellTyped.weakenΓΛ_loop
     · subst hl; rw [hΛfresh] at h; exact nomatch h
     · simp [hl]; exact h)
 
-/-- Sorry-based variant of weakenΓΛ_loop for ANF programs.
-    The freshness conditions (Λ label = none, param binders fresh in Γ) hold for
-    well-formed ANF but are not tracked in the typing judgment. -/
-theorem JoinWellTyped.weakenΓΛ_loop_anf
-    (hjwt : JoinWellTyped jt Δ Γ Λ F E) :
-    JoinWellTyped jt Δ (TyEnv.bindParams Γ params) (LoopTyEnv.extend Λ label entry) F E :=
-  hjwt.weakenΓΛ_loop sorry sorry  -- ANF freshness: Λ label = none, param binders fresh in Γ
-
 /-- Change E from none to any E'. Provable because E=none means no returnErr. -/
 theorem JoinWellTyped.changeE_from_none
     (hjwt : JoinWellTyped jt Δ Γ Λ F none) :
     JoinWellTyped jt Δ Γ Λ F E' := by
   intro func params jbody paramTys retTy hjt' hΔ
-  obtain ⟨hmap, hfp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
-  exact ⟨hmap, hfp, hbody.strengthen_E_from_none E'⟩
+  obtain ⟨hmap, hfp, hΓp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
+  exact ⟨hmap, hfp, hΓp, hbody.strengthen_E_from_none E'⟩
 
 /-- Change the E parameter of JoinWellTyped. Sound because E only affects returnErr/handleError
     constructors, and join bodies can be re-typed at any E.
@@ -801,8 +819,8 @@ theorem JoinWellTyped.changeE
   | none => exact hjwt.changeE_from_none
   | some errTy =>
     intro func params jbody paramTys retTy hjt' hΔ
-    obtain ⟨hmap, hfp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
-    exact ⟨hmap, hfp, sorry⟩  -- some errTy → E': needs errTy matching (ANF property)
+    obtain ⟨hmap, hfp, hΓp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
+    exact ⟨hmap, hfp, hΓp, sorry⟩  -- some errTy → E': needs errTy matching (ANF property)
 
 /-- Extend JoinWellTyped with a new tail-join point.
     Uses Δ-monotonicity to lift old body typings to the extended Δ. -/
@@ -810,6 +828,7 @@ theorem JoinWellTyped.extend_tail
     (hjwt : JoinWellTyped jt Δ Γ Λ F E)
     (hbody : HasType (TyEnv.bindParams Γ params) Δ Λ F E fnBody τ)
     (hparams : ∀ p, p ∈ params → F p.binder = none)
+    (hΓparams : ∀ p, p ∈ params → Γ p.binder = none)
     (hmap : params.map (·.ty) = paramTys)
     (hΔfresh : Δ name = none) :
     JoinWellTyped (JoinTable.extend jt name ⟨params, fnBody⟩)
@@ -826,17 +845,18 @@ theorem JoinWellTyped.extend_tail
     simp [JoinTyEnv.extend] at hΔ'
     obtain ⟨rfl, rfl⟩ := hjt'
     obtain ⟨rfl, rfl⟩ := hΔ'
-    exact ⟨hmap, hparams, hbody.strengthen_Δ hmono⟩
+    exact ⟨hmap, hparams, hΓparams, hbody.strengthen_Δ hmono⟩
   · simp [JoinTable.extend, h] at hjt'
     simp [JoinTyEnv.extend, h] at hΔ'
-    obtain ⟨hmap', hfp', hbody'⟩ := hjwt func params' jbody' paramTys' retTy' hjt' hΔ'
-    exact ⟨hmap', hfp', hbody'.strengthen_Δ hmono⟩
+    obtain ⟨hmap', hfp', hΓp', hbody'⟩ := hjwt func params' jbody' paramTys' retTy' hjt' hΔ'
+    exact ⟨hmap', hfp', hΓp', hbody'.strengthen_Δ hmono⟩
 
 /-- Extend JoinWellTyped with a new non-tail-join point. -/
 theorem JoinWellTyped.extend_nontail
     (hjwt : JoinWellTyped jt Δ Γ Λ F E)
     (hbody : HasType (TyEnv.bindParams Γ params) Δ Λ F E fnBody joinTy)
     (hparams : ∀ p, p ∈ params → F p.binder = none)
+    (hΓparams : ∀ p, p ∈ params → Γ p.binder = none)
     (hmap : params.map (·.ty) = paramTys)
     (hΔfresh : Δ name = none) :
     JoinWellTyped (JoinTable.extend jt name ⟨params, fnBody⟩)
@@ -853,11 +873,11 @@ theorem JoinWellTyped.extend_nontail
     simp [JoinTyEnv.extend] at hΔ'
     obtain ⟨rfl, rfl⟩ := hjt'
     obtain ⟨rfl, rfl⟩ := hΔ'
-    exact ⟨hmap, hparams, hbody.strengthen_Δ hmono⟩
+    exact ⟨hmap, hparams, hΓparams, hbody.strengthen_Δ hmono⟩
   · simp [JoinTable.extend, h] at hjt'
     simp [JoinTyEnv.extend, h] at hΔ'
-    obtain ⟨hmap', hfp', hbody'⟩ := hjwt func params' jbody' paramTys' retTy' hjt' hΔ'
-    exact ⟨hmap', hfp', hbody'.strengthen_Δ hmono⟩
+    obtain ⟨hmap', hfp', hΓp', hbody'⟩ := hjwt func params' jbody' paramTys' retTy' hjt' hΔ'
+    exact ⟨hmap', hfp', hΓp', hbody'.strengthen_Δ hmono⟩
 
 /-- Extract field typing from StoreWellTyped evidence for fieldRecord.
     Given that fields and types have matching sizes, each index is well-typed,
@@ -968,7 +988,7 @@ def preservation
 
   -- ════════ All abort propagation (use IH + weaken) ════════
   | .letAbort heval_rhs hab => match htype with
-    | .let _ htype_rhs _ => (preservation htype_rhs heval_rhs henv hft hcinv hdisj hftc hjwt).weaken hab
+    | .let _ _ htype_rhs _ => (preservation htype_rhs heval_rhs henv hft hcinv hdisj hftc hjwt).weaken hab
   | .assignAbort heval_e hab => match htype with
     | .assign _ htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt).weaken hab
   | .mutateAbortRec heval_rec hab => match htype with
@@ -1020,7 +1040,7 @@ def preservation
   | .seqAbort h => match htype with
     | .seq htype_exprs _ => preservationArgsAbort htype_exprs h henv hft hcinv hdisj hftc hjwt
   | .loopAbort h => match htype with
-    | .loop _ htype_args _ => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt
+    | .loop _ _ _ htype_args _ => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt
   | .continueAbort h => match htype with
     | .continue _ htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt
 
@@ -1061,44 +1081,44 @@ def preservation
   -- ════════ Recursive cases (IH via structural recursion) ════════
 
   | .let heval_rhs heval_body => match htype with
-    | .let hFname htype_rhs htype_body =>
+    | .let hΓfresh hFname htype_rhs htype_body =>
       let pr := preservation htype_rhs heval_rhs henv hft hcinv hdisj hftc hjwt
       let hvt := pr.hasType.getVal
       let hcl := pr.closureOk _ rfl
       let henv' := EnvWellTyped.extend_preserves henv hvt
       let hcinv' := ClosureInvariant.extend hcinv hcl
       preservation htype_body heval_body henv' hft hcinv' (hdisj.extend hFname) hftc
-        (hjwt.weakenΓ_extend_anf)
+        (hjwt.weakenΓ_extend hΓfresh)
 
   | .letfnNonrec heval_body => match htype with
-    | .letfnNonrec hFname hparams htype_fn htype_body =>
+    | .letfnNonrec hΓfresh hFname hparams htype_fn htype_body =>
       let hcl := ValClosureOk.mk_closure henv hcinv hdisj hparams htype_fn
       let henv' := EnvWellTyped.extend_preserves henv ValueHasType.closure
       let hcinv' := ClosureInvariant.extend hcinv hcl
       preservation htype_body heval_body henv' hft hcinv' (hdisj.extend hFname) hftc
-        (hjwt.weakenΓ_extend_anf)
+        (hjwt.weakenΓ_extend hΓfresh)
 
   | .letfnRec hrecEnv_eq heval_body => match htype with
-    | .letfnRec hFname hparams htype_fn htype_body =>
+    | .letfnRec hΓfresh hFname hparams htype_fn htype_body =>
       let hcl := ValClosureOk.recClosure rfl hrecEnv_eq henv (fun x v τ h1 h2 => hcinv x v τ h1 h2)
         hdisj hFname hparams htype_fn
       let henv' := hrecEnv_eq ▸ EnvWellTyped.extend_preserves henv ValueHasType.closure
       let hcinv' := hrecEnv_eq ▸ ClosureInvariant.extend hcinv hcl
       preservation htype_body heval_body henv' hft hcinv' (hrecEnv_eq ▸ hdisj.extend hFname) hftc
-        (hjwt.weakenΓ_extend_anf)
+        (hjwt.weakenΓ_extend hΓfresh)
 
   | .letfnTailJoin heval_body => match htype with
-    | .letfnTailJoin hfparams htype_fn htype_body =>
+    | .letfnTailJoin hΔfresh hΓparams hfparams htype_fn htype_body =>
       preservation htype_body heval_body henv hft hcinv hdisj hftc
-        (hjwt.extend_tail htype_fn hfparams rfl sorry)
+        (hjwt.extend_tail htype_fn hfparams hΓparams rfl hΔfresh)
 
   | .letfnNontailJoin heval_body => match htype with
-    | .letfnNontailJoin hfparams htype_fn htype_body =>
+    | .letfnNontailJoin hΔfresh hΓparams hfparams htype_fn htype_body =>
       preservation htype_body heval_body henv hft hcinv hdisj hftc
-        (hjwt.extend_nontail htype_fn hfparams rfl sorry)
+        (hjwt.extend_nontail htype_fn hfparams hΓparams rfl hΔfresh)
 
   | .letrec hrecEnv_eq heval_body => match htype with
-    | .letrec (bindings := bindings) (retTy := retTy) hrecΓ_eq hFnames hFparams hbodies htype_body => by
+    | .letrec (bindings := bindings) (retTy := retTy) hrecΓ_eq hΓfresh hDistinct hFnames hFparams hbodies htype_body => by
       -- Build the three invariants for recEnv/recΓ and call preservation on body
       -- weakenΓ_extendMany needs freshness for the zipped bindings list
       have hΓfresh' : ∀ i (hi : i < ((bindings.map fun b => b.1).zip
@@ -1108,8 +1128,20 @@ def preservation
         intro i hi
         simp [List.length_zip, List.length_map] at hi
         simp [List.getElem_zip, List.getElem_map]
-        exact sorry  -- ANF freshness: letrec binding names fresh in Γ
-      refine preservation htype_body heval_body ?_ hft ?_ ?_ hftc (hrecΓ_eq ▸ hjwt.weakenΓ_extendMany hΓfresh')
+        exact hΓfresh i hi
+      have hDistinct' : ∀ i j (hi : i < ((bindings.map fun b => b.1).zip
+          (bindings.map fun b => Mtype.func ((b.2.1).map fun p => p.ty) retTy)).length)
+          (hj : j < ((bindings.map fun b => b.1).zip
+          (bindings.map fun b => Mtype.func ((b.2.1).map fun p => p.ty) retTy)).length),
+          i ≠ j → (((bindings.map fun b => b.1).zip
+            (bindings.map fun b => Mtype.func ((b.2.1).map fun p => p.ty) retTy))[i]'hi).1 ≠
+          (((bindings.map fun b => b.1).zip
+            (bindings.map fun b => Mtype.func ((b.2.1).map fun p => p.ty) retTy))[j]'hj).1 := by
+        intro i j hi hj hij
+        simp [List.length_zip, List.length_map] at hi hj
+        simp [List.getElem_zip, List.getElem_map]
+        exact hDistinct i j hi hj hij
+      refine preservation htype_body heval_body ?_ hft ?_ ?_ hftc (hrecΓ_eq ▸ hjwt.weakenΓ_extendMany hΓfresh' hDistinct')
       · -- EnvWellTyped recEnv recΓ
         rw [hrecEnv_eq, hrecΓ_eq]
         apply EnvWellTyped.extendMany_preserves henv
@@ -1365,7 +1397,7 @@ def preservation
         exact absurd hFsome (by rw [hdisj.2 _ _ _ henv_v]; exact fun h => nomatch h)
   | .applyJoin hjt heval_args hlen heval_body => match htype with
     | .applyJoin hΔ htype_args =>
-      let ⟨hmap, hfparams, hbody_typed⟩ := hjwt _ _ _ _ _ hjt hΔ
+      let ⟨hmap, hfparams, hΓparams, hbody_typed⟩ := hjwt _ _ _ _ _ hjt hΔ
       let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt
       let hvts := hmap ▸ apr.hasTypes
       let hlen_bp := by have := hvts.length_eq; simp [List.length_map] at this; omega
@@ -1376,7 +1408,7 @@ def preservation
           exact hmap ▸ this)
       preservation hbody_typed heval_body henv_body hft hcinv_body
         (FnEnvDisjoint.bindParams hdisj _ _ hfparams) hftc
-        (hjwt.weakenΓ_bindParams (fun p _ => sorry))  -- ANF freshness: join params fresh in Γ
+        (hjwt.weakenΓ_bindParams hΓparams)
 
   -- ════════ Tuple (needs ValueListHasType from preservationArgs) ════════
   | .tuple heval_args => match htype with
@@ -1386,7 +1418,7 @@ def preservation
 
   -- ════════ Loop ════════
   | .loopVal heval_args heval_body => match htype with
-    | .loop hloopParams htype_args htype_body =>
+    | .loop hΛfresh hΓpfresh hloopParams htype_args htype_body =>
       let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt
       let hlen := by
         have := apr.hasTypes.length_eq; simp [List.length_map] at this; omega
@@ -1394,9 +1426,9 @@ def preservation
       let hcinv' := ClosureInvariant.bindParams hcinv _ _ apr.hasTypes hlen
         (fun i hv hτ => apr.closureOks i hv (by simp [List.length_map]; exact hτ))
       (preservation htype_body heval_body henv' hft hcinv'
-        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop_anf)).liftVal
+        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΛfresh hΓpfresh)).liftVal
   | .loopBreak heval_args heval_body => match htype with
-    | .loop hloopParams htype_args htype_body =>
+    | .loop hΛfresh hΓpfresh hloopParams htype_args htype_body =>
       let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt
       let hlen := by
         have := apr.hasTypes.length_eq; simp [List.length_map] at this; omega
@@ -1404,7 +1436,7 @@ def preservation
       let hcinv' := ClosureInvariant.bindParams hcinv _ _ apr.hasTypes hlen
         (fun i hv hτ => apr.closureOks i hv (by simp [List.length_map]; exact hτ))
       let pr := preservation htype_body heval_body henv' hft hcinv'
-        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop_anf)
+        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΛfresh hΓpfresh)
       by
         cases pr.hasType with
         | breakSome hΛ hvt hcl =>
@@ -1412,7 +1444,7 @@ def preservation
           obtain ⟨_, rfl⟩ := hΛ
           exact PresResult.val' hvt hcl
   | .loopBreakNone heval_args heval_body => match htype with
-    | .loop hloopParams htype_args htype_body =>
+    | .loop hΛfresh hΓpfresh hloopParams htype_args htype_body =>
       let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt
       let hlen := by
         have := apr.hasTypes.length_eq; simp [List.length_map] at this; omega
@@ -1420,7 +1452,7 @@ def preservation
       let hcinv' := ClosureInvariant.bindParams hcinv _ _ apr.hasTypes hlen
         (fun i hv hτ => apr.closureOks i hv (by simp [List.length_map]; exact hτ))
       let pr := preservation htype_body heval_body henv' hft hcinv'
-        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop_anf)
+        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΛfresh hΓpfresh)
       by
         cases pr.hasType with
         | breakNone hΛ =>
@@ -1428,7 +1460,7 @@ def preservation
           obtain ⟨_, rfl⟩ := hΛ
           exact PresResult.val' .unit (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
   | .loopContinue heval_args heval_body hlen_cont heval_reentry => match htype with
-    | .loop hloopParams htype_args htype_body =>
+    | .loop hΛfresh hΓpfresh hloopParams htype_args htype_body =>
       let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt
       let hlen := by
         have := apr.hasTypes.length_eq; simp [List.length_map] at this; omega
@@ -1436,18 +1468,18 @@ def preservation
       let hcinv' := ClosureInvariant.bindParams hcinv _ _ apr.hasTypes hlen
         (fun i hv hτ => apr.closureOks i hv (by simp [List.length_map]; exact hτ))
       let pr := preservation htype_body heval_body henv' hft hcinv'
-        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop_anf)
+        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΛfresh hΓpfresh)
       by
         cases pr.hasType with
         | «continue» hΛ hvts_next hclos_next =>
           simp [LoopTyEnv.extend] at hΛ
           obtain ⟨rfl, rfl⟩ := hΛ
           exact preservationLoopReentry htype_body heval_reentry henv hft hcinv hdisj hftc hjwt
-            hloopParams hvts_next hclos_next
+            hloopParams hΛfresh hΓpfresh hvts_next hclos_next
   | .loopReturn heval_args heval_body => match htype with
-    | .loop _ htype_args htype_body => .return'
+    | .loop _ _ _ htype_args htype_body => .return'
   | .loopError heval_args heval_body => match htype with
-    | .loop hloopParams htype_args htype_body =>
+    | .loop hΛfresh hΓpfresh hloopParams htype_args htype_body =>
       let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt
       let hlen := by
         have := apr.hasTypes.length_eq; simp [List.length_map] at this; omega
@@ -1455,7 +1487,7 @@ def preservation
       let hcinv' := ClosureInvariant.bindParams hcinv _ _ apr.hasTypes hlen
         (fun i hv hτ => apr.closureOks i hv (by simp [List.length_map]; exact hτ))
       let pr := preservation htype_body heval_body henv' hft hcinv'
-        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop_anf)
+        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΛfresh hΓpfresh)
       pr.errorWeaken
 
   -- ════════ Error handling ════════
@@ -1474,7 +1506,7 @@ def preservation
   | .handleErrorJoinErr heval_obj hjt_lookup heval_body => match htype with
     | .handleErrorJoinapply htype_obj hΔ =>
       -- Get join body typing from JoinWellTyped invariant (at outer E)
-      let ⟨hmap, hfparams, hbody_typed⟩ := hjwt _ _ _ _ _ hjt_lookup hΔ
+      let ⟨hmap, hfparams, hΓparams, hbody_typed⟩ := hjwt _ _ _ _ _ hjt_lookup hΔ
       -- Get error value typing from preservation on obj (at E = some errTy)
       let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt.changeE
       let hvt_err := pr.errorTyped _ _ rfl rfl  -- ValueHasType v errTy
@@ -1502,7 +1534,7 @@ def preservation
       -- Preservation on join body
       preservation hbody_typed heval_body henv_body hft hcinv_body
         (FnEnvDisjoint.bindParams hdisj _ _ hfparams) hftc
-        (hjwt.weakenΓ_bindParams (fun p _ => sorry))  -- ANF freshness: join params fresh in Γ
+        (hjwt.weakenΓ_bindParams hΓparams)
   | .handleErrorReturnErrOk heval_obj => match htype with
     | .handleErrorReturnErr htype_obj => (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt).liftValE
   | .handleErrorReturnErrErr heval_obj => match htype with
@@ -1543,6 +1575,8 @@ def preservationLoopReentry
     (hftc : FnTableComplete ft F)
     (hjwt : JoinWellTyped jt Δ Γ Λ F E)
     (hloopParams : ∀ p, p ∈ params → F p.binder = none)
+    (hΛfresh : Λ label = none)
+    (hΓpfresh : ∀ p, p ∈ params → Γ p.binder = none)
     (hvts : ValueListHasType newVals (params.map (·.ty)))
     (hclos : ∀ i (hv : i < newVals.length) (hτ : i < (params.map (·.ty)).length),
       ValClosureOk (newVals[i]'hv) ((params.map (·.ty))[i]'hτ) F) :
@@ -1555,7 +1589,7 @@ def preservationLoopReentry
     let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
       (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
     exact (preservation htype_body heval_body henv' hft hcinv'
-      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop_anf).liftVal
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΛfresh hΓpfresh)).liftVal
   | .breakSome heval_body =>
     have hlen : params.length = newVals.length := by
       have := hvts.length_eq; simp [List.length_map] at this; omega
@@ -1563,7 +1597,7 @@ def preservationLoopReentry
     let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
       (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
     let pr := preservation htype_body heval_body henv' hft hcinv'
-      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop_anf
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΛfresh hΓpfresh)
     cases pr.hasType with
     | breakSome hΛ hvt hcl =>
       simp [LoopTyEnv.extend] at hΛ
@@ -1576,7 +1610,7 @@ def preservationLoopReentry
     let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
       (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
     let pr := preservation htype_body heval_body henv' hft hcinv'
-      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop_anf
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΛfresh hΓpfresh)
     cases pr.hasType with
     | breakNone hΛ =>
       simp [LoopTyEnv.extend] at hΛ
@@ -1589,13 +1623,13 @@ def preservationLoopReentry
     let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
       (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
     let pr := preservation htype_body heval_body henv' hft hcinv'
-      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop_anf
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΛfresh hΓpfresh)
     cases pr.hasType with
     | «continue» hΛ hvts_next hclos_next =>
       simp [LoopTyEnv.extend] at hΛ
       obtain ⟨rfl, rfl⟩ := hΛ
       exact preservationLoopReentry htype_body hreentry_inner henv hft hcinv hdisj hftc hjwt
-        hloopParams hvts_next hclos_next
+        hloopParams hΛfresh hΓpfresh hvts_next hclos_next
   | .return heval_body => exact .return'
   | .error heval_body =>
     have hlen : params.length = newVals.length := by
@@ -1604,7 +1638,7 @@ def preservationLoopReentry
     let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
       (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
     let pr := preservation htype_body heval_body henv' hft hcinv'
-      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop_anf
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΛfresh hΓpfresh)
     exact pr.errorWeaken
 
 def preservation_val

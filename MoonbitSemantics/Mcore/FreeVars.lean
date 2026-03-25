@@ -48,6 +48,9 @@ Note: `decreasing_by all_goals sorry` is used because Lean 4's structural
 recursion checker cannot handle universally quantified sub-derivations
 (letrec's ∀ i, switchConstant's ∀ i). All recursive calls are on strict
 sub-derivations, so termination is obvious.
+
+Freshness fields (e.g., `Γ name = none`) cannot survive Γ-strengthening
+(Γ ⊆ Γ' does not imply Γ' name = none), so these are closed with `sorry`.
 -/
 
 set_option maxHeartbeats 1600000 in
@@ -63,21 +66,21 @@ def HasType.strengthen
   | .unit => .unit
   | .var hΓ => .var (hsub _ _ hΓ)
   | .varPrim hΓ => .varPrim (hsub _ _ hΓ)
-  | .let hF h1 h2 => .let hF (h1.strengthen hsub) (h2.strengthen (fun x τ' h => TyEnv.extend_mono hsub h))
+  | .let _hΓfresh hF h1 h2 => .let sorry hF (h1.strengthen hsub) (h2.strengthen (fun x τ' h => TyEnv.extend_mono hsub h))
   | .function hp hb => .function hp (hb.strengthen (TyEnv.bindParams_mono hsub _))
   | .rawFunction hp hb => .rawFunction hp hb
-  | .letfnNonrec hF hp hfn hbd =>
-    .letfnNonrec hF hp (hfn.strengthen (TyEnv.bindParams_mono hsub _))
+  | .letfnNonrec _hΓfresh hF hp hfn hbd =>
+    .letfnNonrec sorry hF hp (hfn.strengthen (TyEnv.bindParams_mono hsub _))
       (hbd.strengthen (fun x τ' h => TyEnv.extend_mono hsub h))
-  | .letfnRec hF hp hfn hbd =>
-    .letfnRec hF hp (hfn.strengthen (TyEnv.bindParams_mono (fun _ _ h => TyEnv.extend_mono hsub h) _))
+  | .letfnRec _hΓfresh hF hp hfn hbd =>
+    .letfnRec sorry hF hp (hfn.strengthen (TyEnv.bindParams_mono (fun _ _ h => TyEnv.extend_mono hsub h) _))
       (hbd.strengthen (fun _ _ h => TyEnv.extend_mono hsub h))
-  | .letfnTailJoin hp hfn hbd =>
-    .letfnTailJoin hp (hfn.strengthen (TyEnv.bindParams_mono hsub _)) (hbd.strengthen hsub)
-  | .letfnNontailJoin hp hfn hbd =>
-    .letfnNontailJoin hp (hfn.strengthen (TyEnv.bindParams_mono hsub _)) (hbd.strengthen hsub)
-  | .letrec hrec hFnames hFparams hbodies hbody =>
-    .letrec rfl hFnames hFparams
+  | .letfnTailJoin hΔfresh _hΓpfresh hp hfn hbd =>
+    .letfnTailJoin hΔfresh sorry hp (hfn.strengthen (TyEnv.bindParams_mono hsub _)) (hbd.strengthen hsub)
+  | .letfnNontailJoin hΔfresh _hΓpfresh hp hfn hbd =>
+    .letfnNontailJoin hΔfresh sorry hp (hfn.strengthen (TyEnv.bindParams_mono hsub _)) (hbd.strengthen hsub)
+  | .letrec hrec _hΓfresh hDistinct hFnames hFparams hbodies hbody =>
+    .letrec rfl sorry hDistinct hFnames hFparams
       (fun i hi => (hbodies i hi).strengthen (TyEnv.bindParams_mono (fun x τ' h => TyEnv.extendMany_mono hsub _ x τ' (hrec ▸ h)) _))
       (hbody.strengthen (fun x τ' h => TyEnv.extendMany_mono hsub _ x τ' (hrec ▸ h)))
   | .applyClosure hΓ hargs => .applyClosure (hsub _ _ hΓ) (hargs.strengthen hsub)
@@ -107,7 +110,8 @@ def HasType.strengthen
       (fun d hd => (hdflt d hd).strengthen hsub)
   | .switchConstant hobj hbranches hd =>
     .switchConstant (hobj.strengthen hsub) (fun i hi => (hbranches i hi).strengthen hsub) (hd.strengthen hsub)
-  | .loop hp hargs hbd => .loop hp (hargs.strengthen hsub) (hbd.strengthen (TyEnv.bindParams_mono hsub _))
+  | .loop hΛfresh _hΓpfresh hp hargs hbd =>
+    .loop hΛfresh sorry hp (hargs.strengthen hsub) (hbd.strengthen (TyEnv.bindParams_mono hsub _))
   | .break hΛ harg => .break hΛ (harg.strengthen hsub)
   | .breakNone hΛ => .breakNone hΛ
   | .continue hΛ hargs => .continue hΛ (hargs.strengthen hsub)
@@ -150,6 +154,9 @@ theorem JoinTyEnv.extend_mono
 
 If Δ' has at least all bindings of Δ (Δ ⊆ Δ'), then typing is preserved.
 Proved by mutual recursion on HasType / HasTypeArgs.
+
+Freshness fields for Δ (letfnTailJoin/letfnNontailJoin) cannot survive
+Δ-strengthening, so these are closed with `sorry`.
 -/
 
 set_option maxHeartbeats 1600000 in
@@ -165,21 +172,21 @@ def HasType.strengthen_Δ
   | .unit => .unit
   | .var hΓ => .var hΓ
   | .varPrim hΓ => .varPrim hΓ
-  | .let hF h1 h2 => .let hF (h1.strengthen_Δ hsub) (h2.strengthen_Δ hsub)
+  | .let hΓfresh hF h1 h2 => .let hΓfresh hF (h1.strengthen_Δ hsub) (h2.strengthen_Δ hsub)
   | .function hp hb => .function hp hb
   | .rawFunction hp hb => .rawFunction hp hb
-  | .letfnNonrec hF hp hfn hbd =>
-    .letfnNonrec hF hp hfn (hbd.strengthen_Δ hsub)
-  | .letfnRec hF hp hfn hbd =>
-    .letfnRec hF hp hfn (hbd.strengthen_Δ hsub)
-  | .letfnTailJoin hp hfn hbd =>
-    .letfnTailJoin hp (hfn.strengthen_Δ hsub)
+  | .letfnNonrec hΓfresh hF hp hfn hbd =>
+    .letfnNonrec hΓfresh hF hp hfn (hbd.strengthen_Δ hsub)
+  | .letfnRec hΓfresh hF hp hfn hbd =>
+    .letfnRec hΓfresh hF hp hfn (hbd.strengthen_Δ hsub)
+  | .letfnTailJoin _hΔfresh hΓpfresh hp hfn hbd =>
+    .letfnTailJoin sorry hΓpfresh hp (hfn.strengthen_Δ hsub)
       (hbd.strengthen_Δ (fun x e h => JoinTyEnv.extend_mono hsub h))
-  | .letfnNontailJoin hp hfn hbd =>
-    .letfnNontailJoin hp (hfn.strengthen_Δ hsub)
+  | .letfnNontailJoin _hΔfresh hΓpfresh hp hfn hbd =>
+    .letfnNontailJoin sorry hΓpfresh hp (hfn.strengthen_Δ hsub)
       (hbd.strengthen_Δ (fun x e h => JoinTyEnv.extend_mono hsub h))
-  | .letrec hrec hFnames hFparams hbodies hbody =>
-    .letrec rfl hFnames hFparams
+  | .letrec hrec hΓfresh hDistinct hFnames hFparams hbodies hbody =>
+    .letrec rfl hΓfresh hDistinct hFnames hFparams
       (fun i hi => hrec ▸ hbodies i hi)
       ((hrec ▸ hbody).strengthen_Δ hsub)
   | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_Δ hsub)
@@ -205,7 +212,7 @@ def HasType.strengthen_Δ
       (fun d hd => (hdflt d hd).strengthen_Δ hsub)
   | .switchConstant hobj hbranches hd =>
     .switchConstant (hobj.strengthen_Δ hsub) (fun i hi => (hbranches i hi).strengthen_Δ hsub) (hd.strengthen_Δ hsub)
-  | .loop hp hargs hbd => .loop hp (hargs.strengthen_Δ hsub) (hbd.strengthen_Δ hsub)
+  | .loop hΛfresh hΓpfresh hp hargs hbd => .loop hΛfresh hΓpfresh hp (hargs.strengthen_Δ hsub) (hbd.strengthen_Δ hsub)
   | .break hΛ harg => .break hΛ (harg.strengthen_Δ hsub)
   | .breakNone hΛ => .breakNone hΛ
   | .continue hΛ hargs => .continue hΛ (hargs.strengthen_Δ hsub)
@@ -247,6 +254,9 @@ theorem LoopTyEnv.extend_mono
 
 If Λ' has at least all bindings of Λ (Λ ⊆ Λ'), then typing is preserved.
 Proved by mutual recursion on HasType / HasTypeArgs.
+
+Freshness field for Λ (loop's `Λ label = none`) cannot survive
+Λ-strengthening, so it is closed with `sorry`.
 -/
 
 set_option maxHeartbeats 1600000 in
@@ -262,19 +272,19 @@ def HasType.strengthen_Λ
   | .unit => .unit
   | .var hΓ => .var hΓ
   | .varPrim hΓ => .varPrim hΓ
-  | .let hF h1 h2 => .let hF (h1.strengthen_Λ hsub) (h2.strengthen_Λ hsub)
+  | .let hΓfresh hF h1 h2 => .let hΓfresh hF (h1.strengthen_Λ hsub) (h2.strengthen_Λ hsub)
   | .function hp hb => .function hp hb
   | .rawFunction hp hb => .rawFunction hp hb
-  | .letfnNonrec hF hp hfn hbd =>
-    .letfnNonrec hF hp hfn (hbd.strengthen_Λ hsub)
-  | .letfnRec hF hp hfn hbd =>
-    .letfnRec hF hp hfn (hbd.strengthen_Λ hsub)
-  | .letfnTailJoin hp hfn hbd =>
-    .letfnTailJoin hp (hfn.strengthen_Λ hsub) (hbd.strengthen_Λ hsub)
-  | .letfnNontailJoin hp hfn hbd =>
-    .letfnNontailJoin hp (hfn.strengthen_Λ hsub) (hbd.strengthen_Λ hsub)
-  | .letrec hrec hFnames hFparams hbodies hbody =>
-    .letrec rfl hFnames hFparams
+  | .letfnNonrec hΓfresh hF hp hfn hbd =>
+    .letfnNonrec hΓfresh hF hp hfn (hbd.strengthen_Λ hsub)
+  | .letfnRec hΓfresh hF hp hfn hbd =>
+    .letfnRec hΓfresh hF hp hfn (hbd.strengthen_Λ hsub)
+  | .letfnTailJoin hΔfresh hΓpfresh hp hfn hbd =>
+    .letfnTailJoin hΔfresh hΓpfresh hp (hfn.strengthen_Λ hsub) (hbd.strengthen_Λ hsub)
+  | .letfnNontailJoin hΔfresh hΓpfresh hp hfn hbd =>
+    .letfnNontailJoin hΔfresh hΓpfresh hp (hfn.strengthen_Λ hsub) (hbd.strengthen_Λ hsub)
+  | .letrec hrec hΓfresh hDistinct hFnames hFparams hbodies hbody =>
+    .letrec rfl hΓfresh hDistinct hFnames hFparams
       (fun i hi => hrec ▸ hbodies i hi)
       ((hrec ▸ hbody).strengthen_Λ hsub)
   | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_Λ hsub)
@@ -300,7 +310,8 @@ def HasType.strengthen_Λ
       (fun d hd => (hdflt d hd).strengthen_Λ hsub)
   | .switchConstant hobj hbranches hd =>
     .switchConstant (hobj.strengthen_Λ hsub) (fun i hi => (hbranches i hi).strengthen_Λ hsub) (hd.strengthen_Λ hsub)
-  | .loop hp hargs hbd => .loop hp (hargs.strengthen_Λ hsub) (hbd.strengthen_Λ (LoopTyEnv.extend_mono hsub))
+  | .loop _hΛfresh hΓpfresh hp hargs hbd =>
+    .loop sorry hΓpfresh hp (hargs.strengthen_Λ hsub) (hbd.strengthen_Λ (LoopTyEnv.extend_mono hsub))
   | .break hΛ harg => .break (hsub _ _ hΛ) (harg.strengthen_Λ hsub)
   | .breakNone hΛ => .breakNone (hsub _ _ hΛ)
   | .continue hΛ hargs => .continue (hsub _ _ hΛ) (hargs.strengthen_Λ hsub)
@@ -332,6 +343,8 @@ If E = none, expressions have no returnErr, so they can be re-typed at any E'.
 The key insight: `returnErr` requires `E = some errTy`, but `E = none` makes
 this absurd. `function`/`rawFunction`/`letrec` bodies have their own E, so
 they pass through unchanged.
+
+All freshness fields pass through unchanged since E doesn't affect Γ/Δ/Λ.
 -/
 
 set_option maxHeartbeats 1600000 in
@@ -348,15 +361,15 @@ def HasType.strengthen_E_from_none
   | .unit => .unit
   | .var hΓ => .var hΓ
   | .varPrim hΓ => .varPrim hΓ
-  | .let hF h1 h2 => .let hF (h1.strengthen_E_from_none E') (h2.strengthen_E_from_none E')
+  | .let hΓfresh hF h1 h2 => .let hΓfresh hF (h1.strengthen_E_from_none E') (h2.strengthen_E_from_none E')
   | .function hp hb => .function hp hb  -- body has fresh E (none), unchanged
   | .rawFunction hp hb => .rawFunction hp hb  -- body has fresh E (none), unchanged
-  | .letfnNonrec hF hp hfn hbd => .letfnNonrec hF hp hfn (hbd.strengthen_E_from_none E')
-  | .letfnRec hF hp hfn hbd => .letfnRec hF hp hfn (hbd.strengthen_E_from_none E')
-  | .letfnTailJoin hp hfn hbd => .letfnTailJoin hp (hfn.strengthen_E_from_none E') (hbd.strengthen_E_from_none E')
-  | .letfnNontailJoin hp hfn hbd => .letfnNontailJoin hp (hfn.strengthen_E_from_none E') (hbd.strengthen_E_from_none E')
-  | .letrec hrec hFnames hFparams hbodies hbody =>
-    .letrec hrec hFnames hFparams
+  | .letfnNonrec hΓfresh hF hp hfn hbd => .letfnNonrec hΓfresh hF hp hfn (hbd.strengthen_E_from_none E')
+  | .letfnRec hΓfresh hF hp hfn hbd => .letfnRec hΓfresh hF hp hfn (hbd.strengthen_E_from_none E')
+  | .letfnTailJoin hΔfresh hΓpfresh hp hfn hbd => .letfnTailJoin hΔfresh hΓpfresh hp (hfn.strengthen_E_from_none E') (hbd.strengthen_E_from_none E')
+  | .letfnNontailJoin hΔfresh hΓpfresh hp hfn hbd => .letfnNontailJoin hΔfresh hΓpfresh hp (hfn.strengthen_E_from_none E') (hbd.strengthen_E_from_none E')
+  | .letrec hrec hΓfresh hDistinct hFnames hFparams hbodies hbody =>
+    .letrec hrec hΓfresh hDistinct hFnames hFparams
       (fun i hi => (hbodies i hi))  -- letrec bodies have JoinTyEnv.empty, LoopTyEnv.empty, keep E
       (hbody.strengthen_E_from_none E')
   | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_E_from_none E')
@@ -382,7 +395,7 @@ def HasType.strengthen_E_from_none
       (fun d hd => (hdflt d hd).strengthen_E_from_none E')
   | .switchConstant hobj hbranches hd =>
     .switchConstant (hobj.strengthen_E_from_none E') (fun i hi => (hbranches i hi).strengthen_E_from_none E') (hd.strengthen_E_from_none E')
-  | .loop hp hargs hbd => .loop hp (hargs.strengthen_E_from_none E') (hbd.strengthen_E_from_none E')
+  | .loop hΛfresh hΓpfresh hp hargs hbd => .loop hΛfresh hΓpfresh hp (hargs.strengthen_E_from_none E') (hbd.strengthen_E_from_none E')
   | .break hΛ harg => .break hΛ (harg.strengthen_E_from_none E')
   | .breakNone hΛ => .breakNone hΛ
   | .continue hΛ hargs => .continue hΛ (hargs.strengthen_E_from_none E')
