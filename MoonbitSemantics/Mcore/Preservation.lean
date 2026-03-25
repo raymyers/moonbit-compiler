@@ -33,18 +33,45 @@ def StoreWellTyped (s : Store) (σ : StoreTyping) (F : FnTyTable) : Prop :=
 def StoreTypingMono (σ₁ σ₂ : StoreTyping) : Prop :=
   ∀ l ats, σ₁ l = some ats → σ₂ l = some ats
 
-/-- Store typing is preserved and extended through evaluation.
-    The output store is well-typed under an extended store typing that is
-    monotone with respect to the input. Requires full store typing threading
-    to prove; this is the key lemma for heap soundness. -/
-theorem eval_preserves_storeWT
-    {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable} {lt : LoopTable}
-    {nl : Loc} {e : Expr} {outcome : Outcome} {s' : Store} {nl' : Loc}
-    {σ : StoreTyping} {F : FnTyTable}
-    (_heval : Eval ft env s jt lt nl e outcome s' nl')
-    (_hswt : StoreWellTyped s σ F) :
-    ∃ σ', StoreWellTyped s' σ' F ∧ StoreTypingMono σ σ' :=
-  sorry -- requires full store typing threading through preservation (secondary)
+theorem StoreTypingMono.refl : StoreTypingMono σ σ :=
+  fun _ _ h => h
+
+theorem StoreTypingMono.trans (h₁ : StoreTypingMono σ₁ σ₂) (h₂ : StoreTypingMono σ₂ σ₃) :
+    StoreTypingMono σ₁ σ₃ :=
+  fun l ats h => h₂ l ats (h₁ l ats h)
+
+/-- Extend a store typing with a new location. -/
+def StoreTyping.extend (σ : StoreTyping) (l : Loc) (ats : List Mtype) : StoreTyping :=
+  fun l' => if l' = l then some ats else σ l'
+
+theorem StoreTypingMono.extend (hfresh : σ l = none) :
+    StoreTypingMono σ (σ.extend l ats) := by
+  intro l' ats' h
+  simp [StoreTyping.extend]
+  by_cases hl : l' = l
+  · subst hl; rw [hfresh] at h; exact nomatch h
+  · rw [if_neg hl]; exact h
+
+/-- StoreWellTyped is monotone w.r.t. sub-mappings of σ:
+    if StoreWellTyped s σ₂ F and σ₁ ⊆ σ₂, then StoreWellTyped s σ₁ F. -/
+theorem StoreWellTyped.mono_sub (hswt : StoreWellTyped s σ₂ F) (hmono : StoreTypingMono σ₁ σ₂) :
+    StoreWellTyped s σ₁ F :=
+  fun l ats h => hswt l ats (hmono l ats h)
+
+/-- Packaged store typing output from preservation. -/
+structure StoreOut (s' : Store) (σ_in : StoreTyping) (F : FnTyTable) where
+  σ_out : StoreTyping
+  storeWT : StoreWellTyped s' σ_out F
+  storeMono : StoreTypingMono σ_in σ_out
+
+/-- Trivial StoreOut when the store doesn't change. -/
+def StoreOut.same (hswt : StoreWellTyped s σ F) : StoreOut s σ F :=
+  ⟨σ, hswt, StoreTypingMono.refl⟩
+
+/-- Chain two StoreOuts (sequential evaluation). -/
+def StoreOut.chain (so₁ : StoreOut s₁ σ F) (so₂ : StoreOut s₂ so₁.σ_out F) :
+    StoreOut s₂ σ F :=
+  ⟨so₂.σ_out, so₂.storeWT, StoreTypingMono.trans so₁.storeMono so₂.storeMono⟩
 
 /-! ## Helpers -/
 
