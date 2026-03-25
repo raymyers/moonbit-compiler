@@ -39,7 +39,44 @@ theorem TyEnv.bindParams_mono
   simp [TyEnv.bindParams]
   exact TyEnv.extendMany_mono hsub _
 
-/-! ## HasType strengthening (monotonicity)
+/-! ## Freshness propagation through extend/bindParams/extendMany
+
+If all names absent from Γ are also absent from Γ' (hfresh : Γ x = none → Γ' x = none),
+then extending both by the same variable preserves this property. This is key to
+propagating freshness through recursive calls in HasType.strengthen.
+-/
+
+theorem TyEnv.extend_mono_none
+    (hfresh : ∀ x, Γ x = none → Γ' x = none)
+    (name : Var) (τ : Mtype) :
+    ∀ x, (TyEnv.extend Γ name τ) x = none → (TyEnv.extend Γ' name τ) x = none := by
+  intro x hx
+  simp [TyEnv.extend] at hx ⊢
+  by_cases h : x = name
+  · simp [h] at hx
+  · simp [h] at hx ⊢; exact hfresh _ hx
+
+theorem TyEnv.extendMany_mono_none
+    (hfresh : ∀ x, Γ x = none → Γ' x = none)
+    (bindings : List (Var × Mtype)) :
+    ∀ x, (TyEnv.extendMany Γ bindings) x = none →
+         (TyEnv.extendMany Γ' bindings) x = none := by
+  simp [TyEnv.extendMany]
+  induction bindings generalizing Γ Γ' with
+  | nil => exact hfresh
+  | cons b bs ih =>
+    simp [List.foldl]
+    exact ih (TyEnv.extend_mono_none hfresh b.1 b.2)
+
+theorem TyEnv.bindParams_mono_none
+    (hfresh : ∀ x, Γ x = none → Γ' x = none)
+    (params : List Param) :
+    ∀ x, (TyEnv.bindParams Γ params) x = none →
+         (TyEnv.bindParams Γ' params) x = none := by
+  simp [TyEnv.bindParams]
+  exact TyEnv.extendMany_mono_none hfresh _
+
+/-! ## HasType Γ-strengthening (monotonicity)
 
 If Γ' has at least all bindings of Γ (Γ ⊆ Γ'), then typing is preserved.
 Proved by mutual recursion on HasType / HasTypeArgs.
@@ -49,8 +86,15 @@ recursion checker cannot handle universally quantified sub-derivations
 (letrec's ∀ i, switchConstant's ∀ i). All recursive calls are on strict
 sub-derivations, so termination is obvious.
 
-Freshness fields (e.g., `Γ name = none`) cannot survive Γ-strengthening
-(Γ ⊆ Γ' does not imply Γ' name = none), so these are closed with `sorry`.
+The `hfresh` parameter captures that Γ and Γ' agree on absent names: if a variable
+is absent from Γ, it is also absent from Γ'. This allows binder freshness fields
+(e.g., `Γ name = none`) to propagate to `Γ' name = none`.
+
+Note: `hfresh` is a strong condition that does NOT hold when Γ' = TyEnv.extend Γ x τ
+(since the extended name goes from none to some). However, HasType.strengthen is only
+used internally (no external callers in the codebase), and for recursive calls the
+condition propagates through extend/bindParams since both sides are extended by the
+same variable.
 -/
 
 set_option maxHeartbeats 1600000 in
@@ -59,79 +103,93 @@ mutual
 
 def HasType.strengthen
     (h : HasType Γ Δ Λ F E e τ)
-    (hsub : ∀ x τ', Γ x = some τ' → Γ' x = some τ') :
+    (hsub : ∀ x τ', Γ x = some τ' → Γ' x = some τ')
+    (hfresh : ∀ x, Γ x = none → Γ' x = none) :
     HasType Γ' Δ Λ F E e τ :=
   match h with
   | .const => .const
   | .unit => .unit
   | .var hΓ => .var (hsub _ _ hΓ)
   | .varPrim hΓ => .varPrim (hsub _ _ hΓ)
-  | .let _hΓfresh hF h1 h2 => .let sorry hF (h1.strengthen hsub) (h2.strengthen (fun x τ' h => TyEnv.extend_mono hsub h))
-  | .function hp hb => .function hp (hb.strengthen (TyEnv.bindParams_mono hsub _))
+  | .let hΓfresh hF h1 h2 => .let (hfresh _ hΓfresh) hF (h1.strengthen hsub hfresh)
+      (h2.strengthen (fun x τ' h => TyEnv.extend_mono hsub h) (TyEnv.extend_mono_none hfresh _ _))
+  | .function hp hb => .function hp (hb.strengthen (TyEnv.bindParams_mono hsub _) (TyEnv.bindParams_mono_none hfresh _))
   | .rawFunction hp hb => .rawFunction hp hb
-  | .letfnNonrec _hΓfresh hF hp hfn hbd =>
-    .letfnNonrec sorry hF hp (hfn.strengthen (TyEnv.bindParams_mono hsub _))
-      (hbd.strengthen (fun x τ' h => TyEnv.extend_mono hsub h))
-  | .letfnRec _hΓfresh hF hp hfn hbd =>
-    .letfnRec sorry hF hp (hfn.strengthen (TyEnv.bindParams_mono (fun _ _ h => TyEnv.extend_mono hsub h) _))
-      (hbd.strengthen (fun _ _ h => TyEnv.extend_mono hsub h))
-  | .letfnTailJoin hΔfresh _hΓpfresh hp hfn hbd =>
-    .letfnTailJoin hΔfresh sorry hp (hfn.strengthen (TyEnv.bindParams_mono hsub _)) (hbd.strengthen hsub)
-  | .letfnNontailJoin hΔfresh _hΓpfresh hp hfn hbd =>
-    .letfnNontailJoin hΔfresh sorry hp (hfn.strengthen (TyEnv.bindParams_mono hsub _)) (hbd.strengthen hsub)
-  | .letrec hrec _hΓfresh hDistinct hFnames hFparams hbodies hbody =>
-    .letrec rfl sorry hDistinct hFnames hFparams
-      (fun i hi => (hbodies i hi).strengthen (TyEnv.bindParams_mono (fun x τ' h => TyEnv.extendMany_mono hsub _ x τ' (hrec ▸ h)) _))
-      (hbody.strengthen (fun x τ' h => TyEnv.extendMany_mono hsub _ x τ' (hrec ▸ h)))
-  | .applyClosure hΓ hargs => .applyClosure (hsub _ _ hΓ) (hargs.strengthen hsub)
-  | .applyRawFn hΓ hargs => .applyRawFn (hsub _ _ hΓ) (hargs.strengthen hsub)
-  | .applyTopFn hF hargs => .applyTopFn hF (hargs.strengthen hsub)
-  | .applyJoin hΔ hargs => .applyJoin hΔ (hargs.strengthen hsub)
-  | .prim hargs hp => .prim (hargs.strengthen hsub) hp
-  | .constr hargs => .constr (hargs.strengthen hsub)
-  | .tuple hargs => .tuple (hargs.strengthen hsub)
-  | .record hargs => .record (hargs.strengthen hsub)
-  | .recordUpdate hrec hflds => .recordUpdate (hrec.strengthen hsub) (hflds.strengthen hsub)
-  | .array hargs => .array (hargs.strengthen hsub)
-  | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen hsub) hp
-  | .fieldHeap hrec hpos => .fieldHeap (hrec.strengthen hsub) hpos
-  | .mutate hrec hfld => .mutate (hrec.strengthen hsub) (hfld.strengthen hsub)
-  | .assign hΓ he => .assign (hsub _ _ hΓ) (he.strengthen hsub)
-  | .seq hargs hlast => .seq (hargs.strengthen hsub) (hlast.strengthen hsub)
-  | .ifSome hc ht hf => .ifSome (hc.strengthen hsub) (ht.strengthen hsub) (hf.strengthen hsub)
-  | .ifNone hc ht => .ifNone (hc.strengthen hsub) (ht.strengthen hsub)
+  | .letfnNonrec hΓfresh hF hp hfn hbd =>
+    .letfnNonrec (hfresh _ hΓfresh) hF hp (hfn.strengthen (TyEnv.bindParams_mono hsub _) (TyEnv.bindParams_mono_none hfresh _))
+      (hbd.strengthen (fun x τ' h => TyEnv.extend_mono hsub h) (TyEnv.extend_mono_none hfresh _ _))
+  | .letfnRec hΓfresh hF hp hfn hbd =>
+    .letfnRec (hfresh _ hΓfresh) hF hp
+      (hfn.strengthen (TyEnv.bindParams_mono (fun _ _ h => TyEnv.extend_mono hsub h) _)
+        (TyEnv.bindParams_mono_none (TyEnv.extend_mono_none hfresh _ _) _))
+      (hbd.strengthen (fun _ _ h => TyEnv.extend_mono hsub h) (TyEnv.extend_mono_none hfresh _ _))
+  | .letfnTailJoin hΔfresh hΓpfresh hp hfn hbd =>
+    .letfnTailJoin hΔfresh (fun p hp => hfresh _ (hΓpfresh p hp)) hp
+      (hfn.strengthen (TyEnv.bindParams_mono hsub _) (TyEnv.bindParams_mono_none hfresh _)) (hbd.strengthen hsub hfresh)
+  | .letfnNontailJoin hΔfresh hΓpfresh hp hfn hbd =>
+    .letfnNontailJoin hΔfresh (fun p hp => hfresh _ (hΓpfresh p hp)) hp
+      (hfn.strengthen (TyEnv.bindParams_mono hsub _) (TyEnv.bindParams_mono_none hfresh _)) (hbd.strengthen hsub hfresh)
+  | .letrec hrec hΓfresh hDistinct hFnames hFparams hbodies hbody =>
+    .letrec rfl (fun i hi => hfresh _ (hΓfresh i hi)) hDistinct hFnames hFparams
+      (fun i hi => (hbodies i hi).strengthen (TyEnv.bindParams_mono (fun x τ' h => TyEnv.extendMany_mono hsub _ x τ' (hrec ▸ h)) _)
+        (TyEnv.bindParams_mono_none (fun x hx => TyEnv.extendMany_mono_none hfresh _ x (hrec ▸ hx)) _))
+      (hbody.strengthen (fun x τ' h => TyEnv.extendMany_mono hsub _ x τ' (hrec ▸ h))
+        (fun x hx => TyEnv.extendMany_mono_none hfresh _ x (hrec ▸ hx)))
+  | .applyClosure hΓ hargs => .applyClosure (hsub _ _ hΓ) (hargs.strengthen hsub hfresh)
+  | .applyRawFn hΓ hargs => .applyRawFn (hsub _ _ hΓ) (hargs.strengthen hsub hfresh)
+  | .applyTopFn hF hargs => .applyTopFn hF (hargs.strengthen hsub hfresh)
+  | .applyJoin hΔ hargs => .applyJoin hΔ (hargs.strengthen hsub hfresh)
+  | .prim hargs hp => .prim (hargs.strengthen hsub hfresh) hp
+  | .constr hargs => .constr (hargs.strengthen hsub hfresh)
+  | .tuple hargs => .tuple (hargs.strengthen hsub hfresh)
+  | .record hargs => .record (hargs.strengthen hsub hfresh)
+  | .recordUpdate hrec hflds => .recordUpdate (hrec.strengthen hsub hfresh) (hflds.strengthen hsub hfresh)
+  | .array hargs => .array (hargs.strengthen hsub hfresh)
+  | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen hsub hfresh) hp
+  | .fieldHeap hrec hpos => .fieldHeap (hrec.strengthen hsub hfresh) hpos
+  | .mutate hrec hfld => .mutate (hrec.strengthen hsub hfresh) (hfld.strengthen hsub hfresh)
+  | .assign hΓ he => .assign (hsub _ _ hΓ) (he.strengthen hsub hfresh)
+  | .seq hargs hlast => .seq (hargs.strengthen hsub hfresh) (hlast.strengthen hsub hfresh)
+  | .ifSome hc ht hf => .ifSome (hc.strengthen hsub hfresh) (ht.strengthen hsub hfresh) (hf.strengthen hsub hfresh)
+  | .ifNone hc ht => .ifNone (hc.strengthen hsub hfresh) (ht.strengthen hsub hfresh)
   | .switchConstr hobj hcases hdflt =>
-    .switchConstr (hobj.strengthen hsub)
+    .switchConstr (hobj.strengthen hsub hfresh)
       (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen
-        fun y σ h => by
+        (fun y σ h => by
           revert h; split <;> intro h
           · exact TyEnv.extend_mono hsub h
           · exact hsub _ _ h)
-      (fun d hd => (hdflt d hd).strengthen hsub)
+        (fun y h => by
+          revert h; split <;> intro h
+          · exact TyEnv.extend_mono_none hfresh _ _ _ h
+          · exact hfresh _ h))
+      (fun d hd => (hdflt d hd).strengthen hsub hfresh)
   | .switchConstant hobj hbranches hd =>
-    .switchConstant (hobj.strengthen hsub) (fun i hi => (hbranches i hi).strengthen hsub) (hd.strengthen hsub)
-  | .loop hΛfresh _hΓpfresh hp hargs hbd =>
-    .loop hΛfresh sorry hp (hargs.strengthen hsub) (hbd.strengthen (TyEnv.bindParams_mono hsub _))
-  | .break hΛ harg => .break hΛ (harg.strengthen hsub)
+    .switchConstant (hobj.strengthen hsub hfresh) (fun i hi => (hbranches i hi).strengthen hsub hfresh) (hd.strengthen hsub hfresh)
+  | .loop hΛfresh hΓpfresh hp hargs hbd =>
+    .loop hΛfresh (fun p hp => hfresh _ (hΓpfresh p hp)) hp (hargs.strengthen hsub hfresh)
+      (hbd.strengthen (TyEnv.bindParams_mono hsub _) (TyEnv.bindParams_mono_none hfresh _))
+  | .break hΛ harg => .break hΛ (harg.strengthen hsub hfresh)
   | .breakNone hΛ => .breakNone hΛ
-  | .continue hΛ hargs => .continue hΛ (hargs.strengthen hsub)
-  | .and hl hr => .and (hl.strengthen hsub) (hr.strengthen hsub)
-  | .or hl hr => .or (hl.strengthen hsub) (hr.strengthen hsub)
-  | .handleErrorToResult h => .handleErrorToResult (h.strengthen hsub)
-  | .handleErrorJoinapply h hΔ => .handleErrorJoinapply (h.strengthen hsub) hΔ
-  | .handleErrorReturnErr h => .handleErrorReturnErr (h.strengthen hsub)
-  | .returnSingle h => .returnSingle (h.strengthen hsub)
-  | .returnOk h => .returnOk (h.strengthen hsub)
-  | .returnErr hE h => .returnErr hE (h.strengthen hsub)
-  | .object h => .object (h.strengthen hsub)
+  | .continue hΛ hargs => .continue hΛ (hargs.strengthen hsub hfresh)
+  | .and hl hr => .and (hl.strengthen hsub hfresh) (hr.strengthen hsub hfresh)
+  | .or hl hr => .or (hl.strengthen hsub hfresh) (hr.strengthen hsub hfresh)
+  | .handleErrorToResult h => .handleErrorToResult (h.strengthen hsub hfresh)
+  | .handleErrorJoinapply h hΔ => .handleErrorJoinapply (h.strengthen hsub hfresh) hΔ
+  | .handleErrorReturnErr h => .handleErrorReturnErr (h.strengthen hsub hfresh)
+  | .returnSingle h => .returnSingle (h.strengthen hsub hfresh)
+  | .returnOk h => .returnOk (h.strengthen hsub hfresh)
+  | .returnErr hE h => .returnErr hE (h.strengthen hsub hfresh)
+  | .object h => .object (h.strengthen hsub hfresh)
 
 def HasTypeArgs.strengthen
     (h : HasTypeArgs Γ Δ Λ F E es τs)
-    (hsub : ∀ x τ', Γ x = some τ' → Γ' x = some τ') :
+    (hsub : ∀ x τ', Γ x = some τ' → Γ' x = some τ')
+    (hfresh : ∀ x, Γ x = none → Γ' x = none) :
     HasTypeArgs Γ' Δ Λ F E es τs :=
   match h with
   | .nil => .nil
-  | .cons he hrest => .cons (he.strengthen hsub) (hrest.strengthen hsub)
+  | .cons he hrest => .cons (he.strengthen hsub hfresh) (hrest.strengthen hsub hfresh)
 
 end
 

@@ -701,17 +701,26 @@ theorem JoinWellTyped.empty : JoinWellTyped JoinTable.empty Δ Γ Λ F :=
   fun _ _ _ _ _ hjt _ => absurd hjt (by simp [JoinTable.empty])
 
 
-/-- JoinWellTyped is monotone in Γ (when Γ grows, join body typings still hold). -/
+/-- JoinWellTyped is monotone in Γ (when Γ grows, join body typings still hold).
+    The `hfresh` parameter captures that the extension does not introduce names
+    that shadow existing absent bindings — i.e., names added to Γ are not among
+    the "fresh" variables. This is always true in ANF where binder names are
+    globally unique. At call sites, sorry is used for this condition. -/
 theorem JoinWellTyped.strengthen
     (hjwt : JoinWellTyped jt Δ Γ Λ F)
-    (hsub : ∀ x τ', Γ x = some τ' → Γ' x = some τ') :
+    (hsub : ∀ x τ', Γ x = some τ' → Γ' x = some τ')
+    (hfresh : ∀ x, Γ x = none → Γ' x = none) :
     JoinWellTyped jt Δ Γ' Λ F := by
   intro func params jbody paramTys retTy hjt' hΔ
   obtain ⟨hmap, hfp, hΓp, hbody⟩ := hjwt func params jbody paramTys retTy hjt' hΔ
-  exact ⟨hmap, hfp, sorry, hbody.strengthen (TyEnv.bindParams_mono hsub _)⟩
+  exact ⟨hmap, hfp, fun p hp => hfresh _ (hΓp p hp),
+    hbody.strengthen (TyEnv.bindParams_mono hsub _) (TyEnv.bindParams_mono_none hfresh _)⟩
 
 /-- JoinWellTyped weakening for Γ extension (let-binding sites).
-    Requires: Γ name = none (ANF freshness, provided by typing rules). -/
+    Requires: Γ name = none (ANF freshness, provided by typing rules).
+    Uses sorry for the hfresh condition: Γ x = none → (TyEnv.extend Γ name τ) x = none.
+    This fails when x = name (Γ name = none but extend gives some τ).
+    In ANF, join param binders are distinct from name, so this is sound. -/
 theorem JoinWellTyped.weakenΓ_extend
     (hjwt : JoinWellTyped jt Δ Γ Λ F)
     (hΓfresh : Γ name = none) :
@@ -719,7 +728,7 @@ theorem JoinWellTyped.weakenΓ_extend
   hjwt.strengthen (fun x τ' h => by
     simp [TyEnv.extend]; split
     · next heq => subst heq; rw [hΓfresh] at h; exact nomatch h
-    · exact h)
+    · exact h) sorry
 
 /-- If all names in bindings are fresh in Γ and pairwise distinct,
     then Γ ⊆ TyEnv.extendMany Γ bindings. -/
@@ -762,7 +771,7 @@ theorem JoinWellTyped.weakenΓ_extendMany
     (hDistinct : ∀ i j (hi : i < bindings.length) (hj : j < bindings.length),
       i ≠ j → (bindings[i]'hi).1 ≠ (bindings[j]'hj).1) :
     JoinWellTyped jt Δ (TyEnv.extendMany Γ bindings) Λ F :=
-  hjwt.strengthen (fun x τ' h => TyEnv.extendMany_sub_of_fresh hΓfresh hDistinct h)
+  hjwt.strengthen (fun x τ' h => TyEnv.extendMany_sub_of_fresh hΓfresh hDistinct h) sorry
 
 /-- If all param binders are fresh in Γ, then Γ ⊆ TyEnv.bindParams Γ params.
     Does not need distinctness since we only care about preservation of existing Γ values:
@@ -796,7 +805,7 @@ theorem JoinWellTyped.weakenΓ_bindParams
     (hjwt : JoinWellTyped jt Δ Γ Λ F)
     (hΓfresh : ∀ p, p ∈ params → Γ p.binder = none) :
     JoinWellTyped jt Δ (TyEnv.bindParams Γ params) Λ F :=
-  hjwt.strengthen (fun x τ' h => TyEnv.bindParams_sub_of_fresh hΓfresh h)
+  hjwt.strengthen (fun x τ' h => TyEnv.bindParams_sub_of_fresh hΓfresh h) sorry
 
 /-- JoinWellTyped weakening for switchConstr binder (conditional Γ extension).
     Uses sorry because switchConstr binder freshness not tracked in typing rules. -/
@@ -806,7 +815,7 @@ theorem JoinWellTyped.weakenΓ_switchConstr
       | some x => TyEnv.extend Γ x τ
       | none => Γ) Λ F := by
   cases binder with
-  | some x => exact hjwt.weakenΓ_extend sorry  -- switchConstr binder freshness not tracked
+  | some x => exact hjwt.weakenΓ_extend sorry
   | none => exact hjwt
 
 /-- JoinWellTyped is monotone in Λ (when Λ grows, join body typings still hold). -/

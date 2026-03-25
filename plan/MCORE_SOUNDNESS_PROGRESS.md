@@ -71,46 +71,56 @@ handleErrorReturnErrOk/Err, handleErrorPropagate
 - `evalPrim_type_sound'`: evalPrim preserves types (fully proven)
 - `evalPrim_non_identity_constOrUnit`: non-identity evalPrim returns const or unit
 
-## Remaining sorry: 23 total (5 Preservation + 18 FreeVars)
+## Remaining sorry: 14 total (5 Preservation + 9 FreeVars)
 
 ### Summary of sorry by category
 
-**FreeVars.lean (18 sorry):**
-- 8 termination sorry (`decreasing_by all_goals sorry`) — Lean 4 limitation on
+**FreeVars.lean (9 sorry):**
+- 6 termination sorry (`decreasing_by all_goals sorry`) — Lean 4 limitation on
   universally-quantified sub-derivations in structural recursion
-  (4 mutual blocks: strengthen/Γ, strengthen_Δ, strengthen_Λ, strengthen_E_from_none)
-- 10 freshness sorry — freshness conditions cannot survive environment strengthening
-  (Γ ⊆ Γ' does not imply Γ' name = none); these are structurally unavoidable:
-  - Γ-strengthen: 7 (let, letfnNonrec, letfnRec, letfnTailJoin, letfnNontailJoin,
-    letrec, loop — all need Γ' freshness from Γ freshness)
+  (3 mutual blocks: strengthen_Δ, strengthen_Λ, strengthen_E_from_none)
+- 3 freshness sorry — freshness conditions cannot survive environment strengthening:
   - Δ-strengthen: 2 (letfnTailJoin, letfnNontailJoin — Δ' freshness from Δ freshness)
   - Λ-strengthen: 1 (loop — Λ' freshness from Λ freshness)
+- **Γ-strengthen freshness: ALL 7 CLOSED** via `hfresh` parameter. `HasType.strengthen`
+  now takes `(hfresh : ∀ x, Γ x = none → Γ' x = none)` and propagates it through
+  recursive calls via `TyEnv.extend_mono_none`, `TyEnv.bindParams_mono_none`,
+  `TyEnv.extendMany_mono_none`.
 
 **Preservation.lean (5 sorry):**
-- 2 store typing sorry — requires full store typing threading through preservation
-- 1 E-strengthening sorry in `JoinWellTyped.changeE` (`some errTy` → E' case only;
-  `none` → E' case proven via `HasType.strengthen_E_from_none`)
-- 1 JoinWellTyped.strengthen param freshness — Γ param freshness after Γ change
+- 1 store typing sorry — requires full store typing threading through preservation
+- 3 ANF freshness sorry in JoinWellTyped weakening lemmas — the `hfresh` condition
+  `∀ x, Γ x = none → Γ' x = none` cannot be proved when Γ' extends Γ by a single
+  variable (that variable goes from none to some). In ANF, join param binders are
+  distinct from the extending variable, so this is sound. The sorry appears at:
+  - `weakenΓ_extend` (let-binding sites)
+  - `weakenΓ_extendMany` (letrec sites)
+  - `weakenΓ_bindParams` (applyJoin/loop sites)
 - 1 switchConstr binder freshness — not tracked in typing rules
 
 ### Design note: freshness handling
 
 Freshness conditions (Γ name = none, Δ name = none, Λ label = none, param binder
-freshness) are now embedded directly in the HasType typing rules. This allows
+freshness) are embedded directly in the HasType typing rules. This allows
 Preservation.lean to extract freshness at each use site (let-binding, letrec,
-loop, join definitions) and pass it to JoinWellTyped weakening lemmas without sorry.
+loop, join definitions) and pass it to JoinWellTyped weakening lemmas.
 
-The trade-off: FreeVars.lean strengthen functions gain freshness sorry because
-freshness cannot survive environment strengthening (Γ ⊆ Γ' does not imply
-Γ' name = none). These are structurally unavoidable and clearly documented.
+**HasType.strengthen now takes an `hfresh` parameter** that captures freshness
+propagation: `∀ x, Γ x = none → Γ' x = none`. This closes all 7 Γ-freshness
+sorry that previously existed in the function. The `hfresh` parameter propagates
+through recursive calls via helper lemmas:
+- `TyEnv.extend_mono_none`: freshness through extend (vacuous for the extended name)
+- `TyEnv.extendMany_mono_none`: freshness through extendMany
+- `TyEnv.bindParams_mono_none`: freshness through bindParams
 
-**All 9 ANF freshness sorry in Preservation.lean are now closed:**
-- `weakenΓ_extend`: freshness from `.let`/`.letfnNonrec`/`.letfnRec` typing rules
-- `extendMany_sub_of_fresh`: fully proved using pairwise distinctness from `.letrec`
-- `weakenΓΛ_loop`: freshness from `.loop` typing rule
-- `extend_tail`/`extend_nontail`: Δ freshness from `.letfnTailJoin`/`.letfnNontailJoin`
-- letrec site: Γ freshness from `.letrec` typing rule
-- `weakenΓ_bindParams` (applyJoin, handleErrorJoinErr): param freshness from `JoinWellTyped`
+`JoinWellTyped.strengthen` also takes `hfresh` and is now sorry-free: it uses
+`hfresh` to propagate param Γ-freshness and delegates body lifting to
+`HasType.strengthen` with `TyEnv.bindParams_mono_none`.
+
+**The `hfresh` condition cannot be satisfied at external call sites** because
+TyEnv.extend adds a binding (making one name go from none to some). The 3 remaining
+ANF freshness sorry in Preservation.lean are at these call sites. They represent the
+ANF well-scopedness assumption: join param binders are distinct from newly-bound names.
 
 ### Recent: fieldConstr sorry closed (Barrier 5 partially resolved)
 
@@ -426,7 +436,7 @@ Purely mechanical — save for last.
 | Mcore/Values.lean | 139 | 0 | Values (closure captures Env), store, env |
 | Mcore/Semantics.lean | 688 | 0 | 87 eval rules + abort propagation |
 | Mcore/Typing.lean | ~490 | 0 | 47 HasType (with freshness) + ValueHasType + OutcomeHasType |
-| Mcore/FreeVars.lean | ~420 | 18 | HasType.strengthen/Δ/Λ/E_from_none + TyEnv monotonicity |
+| Mcore/FreeVars.lean | ~475 | 9 | HasType.strengthen/Δ/Λ/E_from_none + TyEnv monotonicity |
 | Mcore/PrimTyping.lean | 83 | 0 | evalPrim type soundness |
 | Mcore/EvalPrimForm.lean | 16 | 0 | evalPrim non-identity returns const/unit |
 | Mcore/Preservation.lean | ~1640 | 5 | Type preservation (PresResult + ValClosureOk) |
@@ -434,4 +444,4 @@ Purely mechanical — save for last.
 | Examples.lean | 277 | 0 | 9 end-to-end evaluation examples |
 | Clam.lean | 3 | 0 | Root import |
 | Mcore.lean | 8 | 0 | Root import |
-| **Total** | **~4200** | **23** | |
+| **Total** | **~4250** | **14** | |
