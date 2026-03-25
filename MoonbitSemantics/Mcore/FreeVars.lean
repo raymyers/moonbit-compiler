@@ -364,8 +364,8 @@ def HasType.strengthen_E_from_none
   | .rawFunction hp hb => .rawFunction hp hb  -- body has fresh E (none), unchanged
   | .letfnNonrec hΓfresh hF hp hfn hbd => .letfnNonrec hΓfresh hF hp hfn (hbd.strengthen_E_from_none E')
   | .letfnRec hΓfresh hF hp hfn hbd => .letfnRec hΓfresh hF hp hfn (hbd.strengthen_E_from_none E')
-  | .letfnTailJoin hΔfresh hΓpfresh hp hfn hbd => .letfnTailJoin hΔfresh hΓpfresh hp (hfn.strengthen_E_from_none E') (hbd.strengthen_E_from_none E')
-  | .letfnNontailJoin hΔfresh hΓpfresh hp hfn hbd => .letfnNontailJoin hΔfresh hΓpfresh hp (hfn.strengthen_E_from_none E') (hbd.strengthen_E_from_none E')
+  | .letfnTailJoin hΔfresh hΓpfresh hp hfn hbd => .letfnTailJoin hΔfresh hΓpfresh hp hfn (hbd.strengthen_E_from_none E')
+  | .letfnNontailJoin hΔfresh hΓpfresh hp hfn hbd => .letfnNontailJoin hΔfresh hΓpfresh hp hfn (hbd.strengthen_E_from_none E')
   | .letrec hrec hΓfresh hDistinct hFnames hFparams hbodies hbody =>
     .letrec hrec hΓfresh hDistinct hFnames hFparams
       (fun i hi => (hbodies i hi))  -- letrec bodies have JoinTyEnv.empty, LoopTyEnv.empty, keep E

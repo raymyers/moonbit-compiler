@@ -195,7 +195,7 @@ inductive HasType :
     Δ name = none →
     (∀ p, p ∈ params → Γ p.binder = none) →
     (∀ p, p ∈ params → F p.binder = none) →
-    HasType (TyEnv.bindParams Γ params) Δ Λ F E fnBody τ →
+    HasType (TyEnv.bindParams Γ params) Δ Λ F none fnBody τ →
     HasType Γ (JoinTyEnv.extend Δ name ⟨params.map (·.ty), τ⟩) Λ F E body τ →
     HasType Γ Δ Λ F E (.letfn name params fnBody body .tailJoin) τ
 
@@ -203,7 +203,7 @@ inductive HasType :
     Δ name = none →
     (∀ p, p ∈ params → Γ p.binder = none) →
     (∀ p, p ∈ params → F p.binder = none) →
-    HasType (TyEnv.bindParams Γ params) Δ Λ F E fnBody joinTy →
+    HasType (TyEnv.bindParams Γ params) Δ Λ F none fnBody joinTy →
     HasType Γ (JoinTyEnv.extend Δ name ⟨params.map (·.ty), joinTy⟩) Λ F E body τ →
     HasType Γ Δ Λ F E (.letfn name params fnBody body .nontailJoin) τ
 
