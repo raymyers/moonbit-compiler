@@ -44,7 +44,7 @@ theorem TyEnv.bindParams_mono
 If Γ' has at least all bindings of Γ (Γ ⊆ Γ'), then typing is preserved.
 Proved by mutual recursion on HasType / HasTypeArgs.
 
-Note: `decreasing_by all_goals sorry` is used because Lean 4's structural
+Note: `decreasing_by all_goals sorry` is used in some mutual blocks because Lean 4's
 recursion checker cannot handle universally quantified sub-derivations
 (letrec's ∀ i, switchConstant's ∀ i). All recursive calls are on strict
 sub-derivations, so termination is obvious.
@@ -124,7 +124,6 @@ def HasType.strengthen
   | .returnOk h => .returnOk (h.strengthen hsub)
   | .returnErr hE h => .returnErr hE (h.strengthen hsub)
   | .object h => .object (h.strengthen hsub)
-decreasing_by all_goals sorry
 
 def HasTypeArgs.strengthen
     (h : HasTypeArgs Γ Δ Λ F E es τs)
@@ -133,7 +132,6 @@ def HasTypeArgs.strengthen
   match h with
   | .nil => .nil
   | .cons he hrest => .cons (he.strengthen hsub) (hrest.strengthen hsub)
-decreasing_by all_goals sorry
 
 end
 
