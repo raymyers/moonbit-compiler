@@ -63,21 +63,21 @@ def HasType.strengthen
   | .unit => .unit
   | .var hΓ => .var (hsub _ _ hΓ)
   | .varPrim hΓ => .varPrim (hsub _ _ hΓ)
-  | .let _hΓfresh hF h1 h2 => .let sorry hF (h1.strengthen hsub) (h2.strengthen (fun x τ' h => TyEnv.extend_mono hsub h))
+  | .let hF h1 h2 => .let hF (h1.strengthen hsub) (h2.strengthen (fun x τ' h => TyEnv.extend_mono hsub h))
   | .function hp hb => .function hp (hb.strengthen (TyEnv.bindParams_mono hsub _))
   | .rawFunction hp hb => .rawFunction hp hb
-  | .letfnNonrec _hΓfresh hF hp hfn hbd =>
-    .letfnNonrec sorry hF hp (hfn.strengthen (TyEnv.bindParams_mono hsub _))
+  | .letfnNonrec hF hp hfn hbd =>
+    .letfnNonrec hF hp (hfn.strengthen (TyEnv.bindParams_mono hsub _))
       (hbd.strengthen (fun x τ' h => TyEnv.extend_mono hsub h))
-  | .letfnRec _hΓfresh hF hp hfn hbd =>
-    .letfnRec sorry hF hp (hfn.strengthen (TyEnv.bindParams_mono (fun _ _ h => TyEnv.extend_mono hsub h) _))
+  | .letfnRec hF hp hfn hbd =>
+    .letfnRec hF hp (hfn.strengthen (TyEnv.bindParams_mono (fun _ _ h => TyEnv.extend_mono hsub h) _))
       (hbd.strengthen (fun _ _ h => TyEnv.extend_mono hsub h))
-  | .letfnTailJoin hΔfresh hp hfn hbd =>
-    .letfnTailJoin hΔfresh hp (hfn.strengthen (TyEnv.bindParams_mono hsub _)) (hbd.strengthen hsub)
-  | .letfnNontailJoin hΔfresh hp hfn hbd =>
-    .letfnNontailJoin hΔfresh hp (hfn.strengthen (TyEnv.bindParams_mono hsub _)) (hbd.strengthen hsub)
-  | .letrec hrec _hΓfresh hFnames hFparams hbodies hbody =>
-    .letrec rfl (fun j hj => sorry) hFnames hFparams
+  | .letfnTailJoin hp hfn hbd =>
+    .letfnTailJoin hp (hfn.strengthen (TyEnv.bindParams_mono hsub _)) (hbd.strengthen hsub)
+  | .letfnNontailJoin hp hfn hbd =>
+    .letfnNontailJoin hp (hfn.strengthen (TyEnv.bindParams_mono hsub _)) (hbd.strengthen hsub)
+  | .letrec hrec hFnames hFparams hbodies hbody =>
+    .letrec rfl hFnames hFparams
       (fun i hi => (hbodies i hi).strengthen (TyEnv.bindParams_mono (fun x τ' h => TyEnv.extendMany_mono hsub _ x τ' (hrec ▸ h)) _))
       (hbody.strengthen (fun x τ' h => TyEnv.extendMany_mono hsub _ x τ' (hrec ▸ h)))
   | .applyClosure hΓ hargs => .applyClosure (hsub _ _ hΓ) (hargs.strengthen hsub)
@@ -107,7 +107,7 @@ def HasType.strengthen
       (fun d hd => (hdflt d hd).strengthen hsub)
   | .switchConstant hobj hbranches hd =>
     .switchConstant (hobj.strengthen hsub) (fun i hi => (hbranches i hi).strengthen hsub) (hd.strengthen hsub)
-  | .loop hΛfresh _hΓpfresh hp hargs hbd => .loop hΛfresh (fun p hpm => sorry) hp (hargs.strengthen hsub) (hbd.strengthen (TyEnv.bindParams_mono hsub _))
+  | .loop hp hargs hbd => .loop hp (hargs.strengthen hsub) (hbd.strengthen (TyEnv.bindParams_mono hsub _))
   | .break hΛ harg => .break hΛ (harg.strengthen hsub)
   | .breakNone hΛ => .breakNone hΛ
   | .continue hΛ hargs => .continue hΛ (hargs.strengthen hsub)
@@ -165,21 +165,21 @@ def HasType.strengthen_Δ
   | .unit => .unit
   | .var hΓ => .var hΓ
   | .varPrim hΓ => .varPrim hΓ
-  | .let hΓfresh hF h1 h2 => .let hΓfresh hF (h1.strengthen_Δ hsub) (h2.strengthen_Δ hsub)
+  | .let hF h1 h2 => .let hF (h1.strengthen_Δ hsub) (h2.strengthen_Δ hsub)
   | .function hp hb => .function hp hb
   | .rawFunction hp hb => .rawFunction hp hb
-  | .letfnNonrec hΓfresh hF hp hfn hbd =>
-    .letfnNonrec hΓfresh hF hp hfn (hbd.strengthen_Δ hsub)
-  | .letfnRec hΓfresh hF hp hfn hbd =>
-    .letfnRec hΓfresh hF hp hfn (hbd.strengthen_Δ hsub)
-  | .letfnTailJoin _hΔfresh hp hfn hbd =>
-    .letfnTailJoin sorry hp (hfn.strengthen_Δ hsub)
+  | .letfnNonrec hF hp hfn hbd =>
+    .letfnNonrec hF hp hfn (hbd.strengthen_Δ hsub)
+  | .letfnRec hF hp hfn hbd =>
+    .letfnRec hF hp hfn (hbd.strengthen_Δ hsub)
+  | .letfnTailJoin hp hfn hbd =>
+    .letfnTailJoin hp (hfn.strengthen_Δ hsub)
       (hbd.strengthen_Δ (fun x e h => JoinTyEnv.extend_mono hsub h))
-  | .letfnNontailJoin _hΔfresh hp hfn hbd =>
-    .letfnNontailJoin sorry hp (hfn.strengthen_Δ hsub)
+  | .letfnNontailJoin hp hfn hbd =>
+    .letfnNontailJoin hp (hfn.strengthen_Δ hsub)
       (hbd.strengthen_Δ (fun x e h => JoinTyEnv.extend_mono hsub h))
-  | .letrec hrec hΓfresh hFnames hFparams hbodies hbody =>
-    .letrec rfl hΓfresh hFnames hFparams
+  | .letrec hrec hFnames hFparams hbodies hbody =>
+    .letrec rfl hFnames hFparams
       (fun i hi => hrec ▸ hbodies i hi)
       ((hrec ▸ hbody).strengthen_Δ hsub)
   | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_Δ hsub)
@@ -205,7 +205,7 @@ def HasType.strengthen_Δ
       (fun d hd => (hdflt d hd).strengthen_Δ hsub)
   | .switchConstant hobj hbranches hd =>
     .switchConstant (hobj.strengthen_Δ hsub) (fun i hi => (hbranches i hi).strengthen_Δ hsub) (hd.strengthen_Δ hsub)
-  | .loop hΛfresh hΓpfresh hp hargs hbd => .loop hΛfresh hΓpfresh hp (hargs.strengthen_Δ hsub) (hbd.strengthen_Δ hsub)
+  | .loop hp hargs hbd => .loop hp (hargs.strengthen_Δ hsub) (hbd.strengthen_Δ hsub)
   | .break hΛ harg => .break hΛ (harg.strengthen_Δ hsub)
   | .breakNone hΛ => .breakNone hΛ
   | .continue hΛ hargs => .continue hΛ (hargs.strengthen_Δ hsub)
@@ -262,19 +262,19 @@ def HasType.strengthen_Λ
   | .unit => .unit
   | .var hΓ => .var hΓ
   | .varPrim hΓ => .varPrim hΓ
-  | .let hΓfresh hF h1 h2 => .let hΓfresh hF (h1.strengthen_Λ hsub) (h2.strengthen_Λ hsub)
+  | .let hF h1 h2 => .let hF (h1.strengthen_Λ hsub) (h2.strengthen_Λ hsub)
   | .function hp hb => .function hp hb
   | .rawFunction hp hb => .rawFunction hp hb
-  | .letfnNonrec hΓfresh hF hp hfn hbd =>
-    .letfnNonrec hΓfresh hF hp hfn (hbd.strengthen_Λ hsub)
-  | .letfnRec hΓfresh hF hp hfn hbd =>
-    .letfnRec hΓfresh hF hp hfn (hbd.strengthen_Λ hsub)
-  | .letfnTailJoin hΔfresh hp hfn hbd =>
-    .letfnTailJoin hΔfresh hp (hfn.strengthen_Λ hsub) (hbd.strengthen_Λ hsub)
-  | .letfnNontailJoin hΔfresh hp hfn hbd =>
-    .letfnNontailJoin hΔfresh hp (hfn.strengthen_Λ hsub) (hbd.strengthen_Λ hsub)
-  | .letrec hrec hΓfresh hFnames hFparams hbodies hbody =>
-    .letrec rfl hΓfresh hFnames hFparams
+  | .letfnNonrec hF hp hfn hbd =>
+    .letfnNonrec hF hp hfn (hbd.strengthen_Λ hsub)
+  | .letfnRec hF hp hfn hbd =>
+    .letfnRec hF hp hfn (hbd.strengthen_Λ hsub)
+  | .letfnTailJoin hp hfn hbd =>
+    .letfnTailJoin hp (hfn.strengthen_Λ hsub) (hbd.strengthen_Λ hsub)
+  | .letfnNontailJoin hp hfn hbd =>
+    .letfnNontailJoin hp (hfn.strengthen_Λ hsub) (hbd.strengthen_Λ hsub)
+  | .letrec hrec hFnames hFparams hbodies hbody =>
+    .letrec rfl hFnames hFparams
       (fun i hi => hrec ▸ hbodies i hi)
       ((hrec ▸ hbody).strengthen_Λ hsub)
   | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_Λ hsub)
@@ -300,7 +300,7 @@ def HasType.strengthen_Λ
       (fun d hd => (hdflt d hd).strengthen_Λ hsub)
   | .switchConstant hobj hbranches hd =>
     .switchConstant (hobj.strengthen_Λ hsub) (fun i hi => (hbranches i hi).strengthen_Λ hsub) (hd.strengthen_Λ hsub)
-  | .loop _hΛfresh hΓpfresh hp hargs hbd => .loop sorry hΓpfresh hp (hargs.strengthen_Λ hsub) (hbd.strengthen_Λ (LoopTyEnv.extend_mono hsub))
+  | .loop hp hargs hbd => .loop hp (hargs.strengthen_Λ hsub) (hbd.strengthen_Λ (LoopTyEnv.extend_mono hsub))
   | .break hΛ harg => .break (hsub _ _ hΛ) (harg.strengthen_Λ hsub)
   | .breakNone hΛ => .breakNone (hsub _ _ hΛ)
   | .continue hΛ hargs => .continue (hsub _ _ hΛ) (hargs.strengthen_Λ hsub)
@@ -354,19 +354,19 @@ def HasType.strengthen_E
   | .unit => .unit
   | .var hΓ => .var hΓ
   | .varPrim hΓ => .varPrim hΓ
-  | .let hΓfresh hF h1 h2 => .let hΓfresh hF (h1.strengthen_E E') (h2.strengthen_E E')
+  | .let hF h1 h2 => .let hF (h1.strengthen_E E') (h2.strengthen_E E')
   | .function hp hb => .function hp hb
   | .rawFunction hp hb => .rawFunction hp hb
-  | .letfnNonrec hΓfresh hF hp hfn hbd =>
-    .letfnNonrec hΓfresh hF hp hfn (hbd.strengthen_E E')
-  | .letfnRec hΓfresh hF hp hfn hbd =>
-    .letfnRec hΓfresh hF hp hfn (hbd.strengthen_E E')
-  | .letfnTailJoin hΔfresh hp hfn hbd =>
-    .letfnTailJoin hΔfresh hp (hfn.strengthen_E E') (hbd.strengthen_E E')
-  | .letfnNontailJoin hΔfresh hp hfn hbd =>
-    .letfnNontailJoin hΔfresh hp (hfn.strengthen_E E') (hbd.strengthen_E E')
-  | .letrec hrec hΓfresh hFnames hFparams hbodies hbody =>
-    .letrec rfl hΓfresh hFnames hFparams
+  | .letfnNonrec hF hp hfn hbd =>
+    .letfnNonrec hF hp hfn (hbd.strengthen_E E')
+  | .letfnRec hF hp hfn hbd =>
+    .letfnRec hF hp hfn (hbd.strengthen_E E')
+  | .letfnTailJoin hp hfn hbd =>
+    .letfnTailJoin hp (hfn.strengthen_E E') (hbd.strengthen_E E')
+  | .letfnNontailJoin hp hfn hbd =>
+    .letfnNontailJoin hp (hfn.strengthen_E E') (hbd.strengthen_E E')
+  | .letrec hrec hFnames hFparams hbodies hbody =>
+    .letrec rfl hFnames hFparams
       (fun i hi => hrec ▸ hbodies i hi)
       ((hrec ▸ hbody).strengthen_E E')
   | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_E E')
@@ -392,7 +392,7 @@ def HasType.strengthen_E
       (fun d hd => (hdflt d hd).strengthen_E E')
   | .switchConstant hobj hbranches hd =>
     .switchConstant (hobj.strengthen_E E') (fun i hi => (hbranches i hi).strengthen_E E') (hd.strengthen_E E')
-  | .loop hΛfresh hΓpfresh hp hargs hbd => .loop hΛfresh hΓpfresh hp (hargs.strengthen_E E') (hbd.strengthen_E E')
+  | .loop hp hargs hbd => .loop hp (hargs.strengthen_E E') (hbd.strengthen_E E')
   | .break hΛ harg => .break hΛ (harg.strengthen_E E')
   | .breakNone hΛ => .breakNone hΛ
   | .continue hΛ hargs => .continue hΛ (hargs.strengthen_E E')

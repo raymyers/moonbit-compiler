@@ -71,7 +71,34 @@ handleErrorReturnErrOk/Err, handleErrorPropagate
 - `evalPrim_type_sound'`: evalPrim preserves types (fully proven)
 - `evalPrim_non_identity_constOrUnit`: non-identity evalPrim returns const or unit
 
-## Remaining sorry: 9 total (7 Preservation + 2 FreeVars)
+## Remaining sorry: 21 total (11 Preservation + 10 FreeVars)
+
+### Summary of sorry by category
+
+**FreeVars.lean (10 sorry):**
+- 8 termination sorry (`decreasing_by all_goals sorry`) — Lean 4 limitation on
+  universally-quantified sub-derivations in structural recursion
+- 2 E-strengthening sorry (handleErrorReturnErr, returnErr) — changing error type
+  parameter across error-handling boundaries
+
+**Preservation.lean (11 sorry):**
+- 1 ANF Γ freshness (`weakenΓ_extend_anf`) — let-bound names fresh in Γ
+- 1 ANF Γ freshness for letrec (`extendMany_sub_of_fresh`) — binding names fresh in Γ
+- 1 ANF Γ freshness for letrec call site
+- 2 ANF Δ freshness (letfnTailJoin, letfnNontailJoin) — join names fresh in Δ
+- 2 ANF loop freshness (`weakenΓΛ_loop_anf`) — loop label fresh in Λ, params fresh in Γ
+- 2 ANF join param freshness (applyJoin, handleErrorJoinErr) — join params fresh in Γ
+- 2 store typing sorry — requires full store typing threading through preservation
+
+### Design note: freshness handling
+
+Freshness conditions (Γ name = none, Δ name = none, Λ label = none) were removed
+from the HasType typing judgment because they could not survive environment
+strengthening in FreeVars.lean. Instead, freshness is assumed at the JoinWellTyped
+weakening call sites via sorry-based wrapper lemmas (`weakenΓ_extend_anf`,
+`weakenΓΛ_loop_anf`). The JoinWellTyped helpers (`weakenΓ_extend`, `weakenΓ_bindParams`,
+`weakenΓΛ_loop`) retain their explicit freshness parameters for when freshness
+can be provided.
 
 ### Recent: fieldConstr sorry closed (Barrier 5 partially resolved)
 
@@ -371,12 +398,12 @@ Purely mechanical — save for last.
 | Mcore/Values.lean | 139 | 0 | Values (closure captures Env), store, env |
 | Mcore/Semantics.lean | 688 | 0 | 87 eval rules + abort propagation |
 | Mcore/Typing.lean | 471 | 0 | 47 HasType + ValueHasType + OutcomeHasType |
-| Mcore/FreeVars.lean | 135 | 2 | HasType.strengthen + TyEnv monotonicity |
+| Mcore/FreeVars.lean | ~420 | 10 | HasType.strengthen/Δ/Λ/E + TyEnv monotonicity |
 | Mcore/PrimTyping.lean | 83 | 0 | evalPrim type soundness |
 | Mcore/EvalPrimForm.lean | 16 | 0 | evalPrim non-identity returns const/unit |
-| Mcore/Preservation.lean | 916 | 7 | Type preservation (PresResult + ValClosureOk) |
+| Mcore/Preservation.lean | ~1590 | 11 | Type preservation (PresResult + ValClosureOk) |
 | Mcore/Simulation.lean | 180 | 0 | Mcore→Clam value/type correspondence |
 | Examples.lean | 277 | 0 | 9 end-to-end evaluation examples |
 | Clam.lean | 3 | 0 | Root import |
 | Mcore.lean | 8 | 0 | Root import |
-| **Total** | **~3600** | **9** | |
+| **Total** | **~4100** | **21** | |
