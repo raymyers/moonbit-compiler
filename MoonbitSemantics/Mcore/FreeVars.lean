@@ -430,73 +430,82 @@ set_option maxHeartbeats 1600000 in
 set_option maxRecDepth 512 in
 mutual
 
-/-- E-strengthening from none: expressions typed under E=none have no returnErr,
-    so they can be re-typed at any E'. -/
-def HasType.strengthen_E_from_none
-    (h : HasType Γ Δ Λ F none e τ) (E' : Option Mtype) :
+/-- E-strengthening: expressions typed under E can be re-typed at E' if E = none
+    (no returnErr possible). Takes E as a variable with equality proof. -/
+def HasType.strengthen_E_from_none_aux
+    (h : HasType Γ Δ Λ F E e τ) (hE : E = none) (E' : Option Mtype) :
     HasType Γ Δ Λ F E' e τ :=
   match h with
   | .const => .const
   | .unit => .unit
   | .var hΓ => .var hΓ
   | .varPrim hΓ => .varPrim hΓ
-  | .let hΓfresh hF h1 h2 => .let hΓfresh hF (h1.strengthen_E_from_none E') (h2.strengthen_E_from_none E')
+  | .let hΓfresh hF h1 h2 => .let hΓfresh hF (h1.strengthen_E_from_none_aux hE E') (h2.strengthen_E_from_none_aux hE E')
   | .function hp hb => .function hp hb  -- body has fresh E (none), unchanged
   | .rawFunction hp hb => .rawFunction hp hb  -- body has fresh E (none), unchanged
-  | .letfnNonrec hΓfresh hF hp hfn hbd => .letfnNonrec hΓfresh hF hp hfn (hbd.strengthen_E_from_none E')
-  | .letfnRec hΓfresh hF hp hfn hbd => .letfnRec hΓfresh hF hp hfn (hbd.strengthen_E_from_none E')
-  | .letfnTailJoin hΔfresh hΓpfresh hp hfn hbd => .letfnTailJoin hΔfresh hΓpfresh hp hfn (hbd.strengthen_E_from_none E')
-  | .letfnNontailJoin hΔfresh hΓpfresh hp hfn hbd => .letfnNontailJoin hΔfresh hΓpfresh hp hfn (hbd.strengthen_E_from_none E')
+  | .letfnNonrec hΓfresh hF hp hfn hbd => .letfnNonrec hΓfresh hF hp hfn (hbd.strengthen_E_from_none_aux hE E')
+  | .letfnRec hΓfresh hF hp hfn hbd => .letfnRec hΓfresh hF hp hfn (hbd.strengthen_E_from_none_aux hE E')
+  | .letfnTailJoin hΔfresh hΓpfresh hp hfn hbd => .letfnTailJoin hΔfresh hΓpfresh hp hfn (hbd.strengthen_E_from_none_aux hE E')
+  | .letfnNontailJoin hΔfresh hΓpfresh hp hfn hbd => .letfnNontailJoin hΔfresh hΓpfresh hp hfn (hbd.strengthen_E_from_none_aux hE E')
   | .letrec hrec hΓfresh hDistinct hFnames hFparams hbodies hbody =>
     .letrec rfl hΓfresh hDistinct hFnames hFparams
       (fun i hi => hrec ▸ hbodies i hi)
-      (hrec ▸ hbody.strengthen_E_from_none E')
-  | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_E_from_none E')
-  | .applyRawFn hΓ hargs => .applyRawFn hΓ (hargs.strengthen_E_from_none E')
-  | .applyTopFn hF hargs => .applyTopFn hF (hargs.strengthen_E_from_none E')
-  | .applyJoin hΔ hargs => .applyJoin hΔ (hargs.strengthen_E_from_none E')
-  | .prim hargs hp => .prim (hargs.strengthen_E_from_none E') hp
-  | .constr hargs => .constr (hargs.strengthen_E_from_none E')
-  | .tuple hargs => .tuple (hargs.strengthen_E_from_none E')
-  | .record hargs => .record (hargs.strengthen_E_from_none E')
-  | .recordUpdate hrec hflds => .recordUpdate (hrec.strengthen_E_from_none E') (hflds.strengthen_E_from_none E')
-  | .array hargs => .array (hargs.strengthen_E_from_none E')
-  | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen_E_from_none E') hp
-  | .fieldHeap hrec hp => .fieldHeap (hrec.strengthen_E_from_none E') hp
-  | .mutate hrec hfld => .mutate (hrec.strengthen_E_from_none E') (hfld.strengthen_E_from_none E')
-  | .assign hΓ he => .assign hΓ (he.strengthen_E_from_none E')
-  | .seq hargs hlast => .seq (hargs.strengthen_E_from_none E') (hlast.strengthen_E_from_none E')
-  | .ifSome hc ht hf => .ifSome (hc.strengthen_E_from_none E') (ht.strengthen_E_from_none E') (hf.strengthen_E_from_none E')
-  | .ifNone hc ht => .ifNone (hc.strengthen_E_from_none E') (ht.strengthen_E_from_none E')
+      (hrec ▸ hbody.strengthen_E_from_none_aux hE E')
+  | .applyClosure hΓ hargs => .applyClosure hΓ (hargs.strengthen_E_from_none_aux hE E')
+  | .applyRawFn hΓ hargs => .applyRawFn hΓ (hargs.strengthen_E_from_none_aux hE E')
+  | .applyTopFn hF hargs => .applyTopFn hF (hargs.strengthen_E_from_none_aux hE E')
+  | .applyJoin hΔ hargs => .applyJoin hΔ (hargs.strengthen_E_from_none_aux hE E')
+  | .prim hargs hp => .prim (hargs.strengthen_E_from_none_aux hE E') hp
+  | .constr hargs => .constr (hargs.strengthen_E_from_none_aux hE E')
+  | .tuple hargs => .tuple (hargs.strengthen_E_from_none_aux hE E')
+  | .record hargs => .record (hargs.strengthen_E_from_none_aux hE E')
+  | .recordUpdate hrec hflds => .recordUpdate (hrec.strengthen_E_from_none_aux hE E') (hflds.strengthen_E_from_none_aux hE E')
+  | .array hargs => .array (hargs.strengthen_E_from_none_aux hE E')
+  | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen_E_from_none_aux hE E') hp
+  | .fieldHeap hrec hp => .fieldHeap (hrec.strengthen_E_from_none_aux hE E') hp
+  | .mutate hrec hfld => .mutate (hrec.strengthen_E_from_none_aux hE E') (hfld.strengthen_E_from_none_aux hE E')
+  | .assign hΓ he => .assign hΓ (he.strengthen_E_from_none_aux hE E')
+  | .seq hargs hlast => .seq (hargs.strengthen_E_from_none_aux hE E') (hlast.strengthen_E_from_none_aux hE E')
+  | .ifSome hc ht hf => .ifSome (hc.strengthen_E_from_none_aux hE E') (ht.strengthen_E_from_none_aux hE E') (hf.strengthen_E_from_none_aux hE E')
+  | .ifNone hc ht => .ifNone (hc.strengthen_E_from_none_aux hE E') (ht.strengthen_E_from_none_aux hE E')
   | .switchConstr hobj hcases hdflt =>
-    .switchConstr (hobj.strengthen_E_from_none E')
-      (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen_E_from_none E')
-      (fun d hd => (hdflt d hd).strengthen_E_from_none E')
+    .switchConstr (hobj.strengthen_E_from_none_aux hE E')
+      (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen_E_from_none_aux hE E')
+      (fun d hd => (hdflt d hd).strengthen_E_from_none_aux hE E')
   | .switchConstant hobj hbranches hd =>
-    .switchConstant (hobj.strengthen_E_from_none E') (fun i hi => (hbranches i hi).strengthen_E_from_none E') (hd.strengthen_E_from_none E')
-  | .loop hΛfresh hΓpfresh hp hargs hbd => .loop hΛfresh hΓpfresh hp (hargs.strengthen_E_from_none E') (hbd.strengthen_E_from_none E')
-  | .break hΛ harg => .break hΛ (harg.strengthen_E_from_none E')
+    .switchConstant (hobj.strengthen_E_from_none_aux hE E') (fun i hi => (hbranches i hi).strengthen_E_from_none_aux hE E') (hd.strengthen_E_from_none_aux hE E')
+  | .loop hΛfresh hΓpfresh hp hargs hbd => .loop hΛfresh hΓpfresh hp (hargs.strengthen_E_from_none_aux hE E') (hbd.strengthen_E_from_none_aux hE E')
+  | .break hΛ harg => .break hΛ (harg.strengthen_E_from_none_aux hE E')
   | .breakNone hΛ => .breakNone hΛ
-  | .continue hΛ hargs => .continue hΛ (hargs.strengthen_E_from_none E')
-  | .and hl hr => .and (hl.strengthen_E_from_none E') (hr.strengthen_E_from_none E')
-  | .or hl hr => .or (hl.strengthen_E_from_none E') (hr.strengthen_E_from_none E')
+  | .continue hΛ hargs => .continue hΛ (hargs.strengthen_E_from_none_aux hE E')
+  | .and hl hr => .and (hl.strengthen_E_from_none_aux hE E') (hr.strengthen_E_from_none_aux hE E')
+  | .or hl hr => .or (hl.strengthen_E_from_none_aux hE E') (hr.strengthen_E_from_none_aux hE E')
   | .handleErrorToResult h => .handleErrorToResult h  -- inner E fixed to some errTy, outer changes
   | .handleErrorJoinapply h hΔ => .handleErrorJoinapply h hΔ  -- inner E fixed
-  -- handleErrorReturnErr is impossible: outer E = some errTy contradicts E = none
-  | .returnSingle h => .returnSingle (h.strengthen_E_from_none E')
-  | .returnOk h => .returnOk (h.strengthen_E_from_none E')
-  | .returnErr hE h => nomatch hE  -- E = none ≠ some errTy, so returnErr is impossible!
-  | .object h => .object (h.strengthen_E_from_none E')
-decreasing_by all_goals sorry
+  | @HasType.handleErrorReturnErr _ _ _ _ errTy _ _ _ h => by cases hE  -- E = some errTy, contradicts hE : E = none
+  | .returnSingle h => .returnSingle (h.strengthen_E_from_none_aux hE E')
+  | .returnOk h => .returnOk (h.strengthen_E_from_none_aux hE E')
+  | .returnErr hE' h => by subst hE; exact nomatch hE'  -- E = none ≠ some errTy
+  | .object h => .object (h.strengthen_E_from_none_aux hE E')
+
+def HasTypeArgs.strengthen_E_from_none_aux
+    (h : HasTypeArgs Γ Δ Λ F E es τs) (hE : E = none) (E' : Option Mtype) :
+    HasTypeArgs Γ Δ Λ F E' es τs :=
+  match h with
+  | .nil => .nil
+  | .cons he hrest => .cons (he.strengthen_E_from_none_aux hE E') (hrest.strengthen_E_from_none_aux hE E')
+
+end
+
+/-- Wrapper: E-strengthening from none. -/
+def HasType.strengthen_E_from_none
+    (h : HasType Γ Δ Λ F none e τ) (E' : Option Mtype) :
+    HasType Γ Δ Λ F E' e τ :=
+  h.strengthen_E_from_none_aux rfl E'
 
 def HasTypeArgs.strengthen_E_from_none
     (h : HasTypeArgs Γ Δ Λ F none es τs) (E' : Option Mtype) :
     HasTypeArgs Γ Δ Λ F E' es τs :=
-  match h with
-  | .nil => .nil
-  | .cons he hrest => .cons (he.strengthen_E_from_none E') (hrest.strengthen_E_from_none E')
-decreasing_by all_goals sorry
-
-end
+  h.strengthen_E_from_none_aux rfl E'
 
 end Moonbit.Mcore
