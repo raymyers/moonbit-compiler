@@ -37,37 +37,42 @@ Note: these were previously `axiom` declarations, which introduced global incons
 (the statements are false for `x = name`). They are now `sorry`-based theorems,
 which are proof obligations that do NOT introduce inconsistency. -/
 
-/-- ANF binder uniqueness for TyEnv.extend: freshness propagation.
-    In ANF, binder names in join bodies are distinct from the extension name,
-    so names absent from Γ remain absent in the extended env for all binders.
-    Proof obligation: requires ANF well-formedness (all binder names globally unique). -/
-theorem anf_extend_fresh_TyEnv {Γ : TyEnv} {name : Var} {τ : Mtype} :
-    ∀ x, Γ x = none → (TyEnv.extend Γ name τ) x = none :=
-  fun _ _ => sorry
+/-- Freshness propagation for TyEnv.extend: names ≠ the extension name stay absent. -/
+theorem TyEnv.extend_fresh {Γ : TyEnv} {name : Var} {τ : Mtype} :
+    ∀ x, x ≠ name → Γ x = none → (TyEnv.extend Γ name τ) x = none :=
+  fun x hne hx => by simp [TyEnv.extend, hne]; exact hx
 
-/-- ANF binder uniqueness for TyEnv.extendMany.
-    Proof obligation: requires ANF well-formedness. -/
-theorem anf_extendMany_fresh_TyEnv {Γ : TyEnv} {bindings : List (Var × Mtype)} :
-    ∀ x, Γ x = none → (TyEnv.extendMany Γ bindings) x = none :=
-  fun _ _ => sorry
+/-- Freshness propagation for TyEnv.extendMany: names not in the binding list stay absent. -/
+theorem TyEnv.extendMany_fresh {Γ : TyEnv} {bindings : List (Var × Mtype)} :
+    ∀ x, (∀ b, b ∈ bindings → x ≠ b.1) → Γ x = none → (TyEnv.extendMany Γ bindings) x = none := by
+  intro x hdisj hx; simp [TyEnv.extendMany]
+  induction bindings generalizing Γ with
+  | nil => exact hx
+  | cons b bs ih =>
+    simp [List.foldl]
+    apply ih (fun b' hb' => hdisj b' (List.mem_cons_of_mem _ hb'))
+    have hne := hdisj b (List.Mem.head _); simp [TyEnv.extend, hne]; exact hx
 
-/-- ANF binder uniqueness for TyEnv.bindParams.
-    Proof obligation: requires ANF well-formedness. -/
-theorem anf_bindParams_fresh_TyEnv {Γ : TyEnv} {params : List Param} :
-    ∀ x, Γ x = none → (TyEnv.bindParams Γ params) x = none :=
-  fun _ _ => sorry
+/-- Freshness propagation for TyEnv.bindParams: names not among param binders stay absent. -/
+theorem TyEnv.bindParams_fresh {Γ : TyEnv} {params : List Param} :
+    ∀ x, (∀ p, p ∈ params → x ≠ p.binder) → Γ x = none → (TyEnv.bindParams Γ params) x = none := by
+  intro x hdisj hx; simp [TyEnv.bindParams]
+  exact TyEnv.extendMany_fresh x
+    (fun b hb => by
+      obtain ⟨p, hp, rfl⟩ := List.mem_map.mp hb
+      change x ≠ p.binder
+      exact hdisj p hp)
+    hx
 
-/-- ANF binder uniqueness for JoinTyEnv.extend.
-    Proof obligation: requires ANF well-formedness. -/
-theorem anf_extend_fresh_JoinTyEnv {Δ : JoinTyEnv} {name : Var} {entry : JoinTyEntry} :
-    ∀ x, Δ x = none → (JoinTyEnv.extend Δ name entry) x = none :=
-  fun _ _ => sorry
+/-- Freshness propagation for JoinTyEnv.extend. -/
+theorem JoinTyEnv.extend_fresh {Δ : JoinTyEnv} {name : Var} {entry : JoinTyEntry} :
+    ∀ x, x ≠ name → Δ x = none → (JoinTyEnv.extend Δ name entry) x = none :=
+  fun x hne hx => by simp [JoinTyEnv.extend, hne]; exact hx
 
-/-- ANF binder uniqueness for LoopTyEnv.extend.
-    Proof obligation: requires ANF well-formedness. -/
-theorem anf_extend_fresh_LoopTyEnv {Λ : LoopTyEnv} {label : LoopLabel} {entry : LoopTyEntry} :
-    ∀ l, Λ l = none → (LoopTyEnv.extend Λ label entry) l = none :=
-  fun _ _ => sorry
+/-- Freshness propagation for LoopTyEnv.extend. -/
+theorem LoopTyEnv.extend_fresh {Λ : LoopTyEnv} {label : LoopLabel} {entry : LoopTyEntry} :
+    ∀ l, l ≠ label → Λ l = none → (LoopTyEnv.extend Λ label entry) l = none :=
+  fun l hne hl => by simp [LoopTyEnv.extend, hne]; exact hl
 
 /-! ## Store typing infrastructure -/
 
@@ -792,7 +797,7 @@ theorem JoinWellTyped.weakenΓ_extend
   hjwt.strengthen (fun x τ' h => by
     simp [TyEnv.extend]; split
     · next heq => subst heq; rw [hΓfresh] at h; exact nomatch h
-    · exact h) anf_extend_fresh_TyEnv
+    · exact h) (fun x hx => TyEnv.extend_fresh x (sorry /- ANF: x ≠ name, needs binder disjointness -/) hx)
 
 /-- If all names in bindings are fresh in Γ and pairwise distinct,
     then Γ ⊆ TyEnv.extendMany Γ bindings. -/
@@ -836,7 +841,7 @@ theorem JoinWellTyped.weakenΓ_extendMany
       i ≠ j → (bindings[i]'hi).1 ≠ (bindings[j]'hj).1) :
     JoinWellTyped jt Δ (TyEnv.extendMany Γ bindings) Λ F :=
   hjwt.strengthen (fun x τ' h => TyEnv.extendMany_sub_of_fresh hΓfresh hDistinct h)
-    anf_extendMany_fresh_TyEnv
+    (fun x hx => TyEnv.extendMany_fresh x (sorry /- ANF: ∀ b ∈ bindings, x ≠ b.1, needs binder disjointness -/) hx)
 
 /-- If all param binders are fresh in Γ, then Γ ⊆ TyEnv.bindParams Γ params.
     Does not need distinctness since we only care about preservation of existing Γ values:
@@ -871,7 +876,7 @@ theorem JoinWellTyped.weakenΓ_bindParams
     (hΓfresh : ∀ p, p ∈ params → Γ p.binder = none) :
     JoinWellTyped jt Δ (TyEnv.bindParams Γ params) Λ F :=
   hjwt.strengthen (fun x τ' h => TyEnv.bindParams_sub_of_fresh hΓfresh h)
-    anf_bindParams_fresh_TyEnv
+    (fun x hx => TyEnv.bindParams_fresh x (sorry /- ANF: ∀ p ∈ params, x ≠ p.binder, needs binder disjointness -/) hx)
 
 /-- JoinWellTyped weakening for switchConstr binder (conditional Γ extension).
     Proof obligation: requires ANF freshness (switchConstr binder is fresh in Γ). -/
@@ -910,7 +915,7 @@ theorem JoinWellTyped.weakenΓΛ_loop
     by_cases hl : l = label
     · subst hl; rw [hΛfresh] at h; exact nomatch h
     · simp [hl]; exact h)
-    anf_extend_fresh_LoopTyEnv
+    (fun l hl => LoopTyEnv.extend_fresh l (sorry /- ANF: l ≠ label, needs label disjointness -/) hl)
 
 /-- Extend JoinWellTyped with a new tail-join point.
     Uses Δ-monotonicity to lift old body typings to the extended Δ. -/
@@ -929,7 +934,7 @@ theorem JoinWellTyped.extend_tail
       · subst hx; rw [hΔfresh] at h; exact nomatch h
       · simp [hx]; exact h
   have hfresh_Δ : ∀ x, Δ x = none → (JoinTyEnv.extend Δ name ⟨paramTys, τ⟩) x = none :=
-    anf_extend_fresh_JoinTyEnv
+    fun x hx => JoinTyEnv.extend_fresh x (sorry /- ANF: x ≠ name, needs join label disjointness -/) hx
   intro func params' jbody' paramTys' retTy' hjt' hΔ'
   by_cases h : func = name
   · subst h
@@ -959,7 +964,7 @@ theorem JoinWellTyped.extend_nontail
       · subst hx; rw [hΔfresh] at h; exact nomatch h
       · simp [hx]; exact h
   have hfresh_Δ : ∀ x, Δ x = none → (JoinTyEnv.extend Δ name ⟨paramTys, joinTy⟩) x = none :=
-    anf_extend_fresh_JoinTyEnv
+    fun x hx => JoinTyEnv.extend_fresh x (sorry /- ANF: x ≠ name, needs join label disjointness -/) hx
   intro func params' jbody' paramTys' retTy' hjt' hΔ'
   by_cases h : func = name
   · subst h
