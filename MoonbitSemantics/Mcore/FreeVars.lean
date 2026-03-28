@@ -152,8 +152,9 @@ def HasType.strengthen
   | .seq hargs hlast => .seq (hargs.strengthen hsub hfresh) (hlast.strengthen hsub hfresh)
   | .ifSome hc ht hf => .ifSome (hc.strengthen hsub hfresh) (ht.strengthen hsub hfresh) (hf.strengthen hsub hfresh)
   | .ifNone hc ht => .ifNone (hc.strengthen hsub hfresh) (ht.strengthen hsub hfresh)
-  | .switchConstr hobj hcases hdflt =>
+  | .switchConstr hobj hbfresh hcases hdflt =>
     .switchConstr (hobj.strengthen hsub hfresh)
+      (fun tag x branch hfind => hfresh _ (hbfresh tag x branch hfind))
       (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen
         (fun y σ h => by
           revert h; split <;> intro h
@@ -274,8 +275,8 @@ def HasType.strengthen_Δ
   | .seq hargs hlast => .seq (hargs.strengthen_Δ hsub hfresh) (hlast.strengthen_Δ hsub hfresh)
   | .ifSome hc ht hf => .ifSome (hc.strengthen_Δ hsub hfresh) (ht.strengthen_Δ hsub hfresh) (hf.strengthen_Δ hsub hfresh)
   | .ifNone hc ht => .ifNone (hc.strengthen_Δ hsub hfresh) (ht.strengthen_Δ hsub hfresh)
-  | .switchConstr hobj hcases hdflt =>
-    .switchConstr (hobj.strengthen_Δ hsub hfresh)
+  | .switchConstr hobj hbfresh hcases hdflt =>
+    .switchConstr (hobj.strengthen_Δ hsub hfresh) hbfresh
       (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen_Δ hsub hfresh)
       (fun d hd => (hdflt d hd).strengthen_Δ hsub hfresh)
   | .switchConstant hobj hbranches hd =>
@@ -383,8 +384,8 @@ def HasType.strengthen_Λ
   | .seq hargs hlast => .seq (hargs.strengthen_Λ hsub hfresh) (hlast.strengthen_Λ hsub hfresh)
   | .ifSome hc ht hf => .ifSome (hc.strengthen_Λ hsub hfresh) (ht.strengthen_Λ hsub hfresh) (hf.strengthen_Λ hsub hfresh)
   | .ifNone hc ht => .ifNone (hc.strengthen_Λ hsub hfresh) (ht.strengthen_Λ hsub hfresh)
-  | .switchConstr hobj hcases hdflt =>
-    .switchConstr (hobj.strengthen_Λ hsub hfresh)
+  | .switchConstr hobj hbfresh hcases hdflt =>
+    .switchConstr (hobj.strengthen_Λ hsub hfresh) hbfresh
       (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen_Λ hsub hfresh)
       (fun d hd => (hdflt d hd).strengthen_Λ hsub hfresh)
   | .switchConstant hobj hbranches hd =>
@@ -468,8 +469,8 @@ def HasType.strengthen_E_from_none_aux
   | .seq hargs hlast => .seq (hargs.strengthen_E_from_none_aux hE E') (hlast.strengthen_E_from_none_aux hE E')
   | .ifSome hc ht hf => .ifSome (hc.strengthen_E_from_none_aux hE E') (ht.strengthen_E_from_none_aux hE E') (hf.strengthen_E_from_none_aux hE E')
   | .ifNone hc ht => .ifNone (hc.strengthen_E_from_none_aux hE E') (ht.strengthen_E_from_none_aux hE E')
-  | .switchConstr hobj hcases hdflt =>
-    .switchConstr (hobj.strengthen_E_from_none_aux hE E')
+  | .switchConstr hobj hbfresh hcases hdflt =>
+    .switchConstr (hobj.strengthen_E_from_none_aux hE E') hbfresh
       (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen_E_from_none_aux hE E')
       (fun d hd => (hdflt d hd).strengthen_E_from_none_aux hE E')
   | .switchConstant hobj hbranches hd =>

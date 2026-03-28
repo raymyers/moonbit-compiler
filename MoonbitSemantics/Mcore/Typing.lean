@@ -325,6 +325,7 @@ inductive HasType :
   /-- Switch on constructors: all branches (and default) must have type τ. -/
   | switchConstr :
     HasType Γ Δ Λ F E obj (.constr tid ats) →
+    (∀ tag (x : Var) branch, findConstrCase cases tag = some (some x, branch) → Γ x = none) →
     (∀ tag binder branch, findConstrCase cases tag = some (binder, branch) →
       HasType (match binder with
         | some x => TyEnv.extend Γ x (.constr tid ats)
