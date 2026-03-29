@@ -152,7 +152,6 @@ inductive HasType :
   -- ═══════════ Let binding ═══════════
 
   | «let» :
-    Γ name = none →
     F name = none →
     HasType Γ Δ Λ F E rhs τ₁ →
     HasType (TyEnv.extend Γ name τ₁) Δ Λ F E body τ₂ →
@@ -175,7 +174,6 @@ inductive HasType :
   -- ═══════════ Local function bindings ═══════════
 
   | letfnNonrec :
-    Γ name = none →
     F name = none →
     (∀ p, p ∈ params → F p.binder = none) →
     HasType (TyEnv.bindParams Γ params) JoinTyEnv.empty LoopTyEnv.empty F none fnBody retTy →
@@ -183,7 +181,6 @@ inductive HasType :
     HasType Γ Δ Λ F E (.letfn name params fnBody body .nonRecursive) τ
 
   | letfnRec :
-    Γ name = none →
     F name = none →
     (∀ p, p ∈ params → F p.binder = none) →
     HasType (TyEnv.bindParams (TyEnv.extend Γ name (.func (params.map (·.ty)) retTy)) params)
@@ -192,16 +189,12 @@ inductive HasType :
     HasType Γ Δ Λ F E (.letfn name params fnBody body .recursive) τ
 
   | letfnTailJoin :
-    Δ name = none →
-    (∀ p, p ∈ params → Γ p.binder = none) →
     (∀ p, p ∈ params → F p.binder = none) →
     HasType (TyEnv.bindParams Γ params) Δ Λ F none fnBody τ →
     HasType Γ (JoinTyEnv.extend Δ name ⟨params.map (·.ty), τ⟩) Λ F E body τ →
     HasType Γ Δ Λ F E (.letfn name params fnBody body .tailJoin) τ
 
   | letfnNontailJoin :
-    Δ name = none →
-    (∀ p, p ∈ params → Γ p.binder = none) →
     (∀ p, p ∈ params → F p.binder = none) →
     HasType (TyEnv.bindParams Γ params) Δ Λ F none fnBody joinTy →
     HasType Γ (JoinTyEnv.extend Δ name ⟨params.map (·.ty), joinTy⟩) Λ F E body τ →
@@ -212,8 +205,6 @@ inductive HasType :
   | letrec :
     recΓ = TyEnv.extendMany Γ
       ((bindings.map (·.1)).zip (bindings.map fun (_, ps, _) => Mtype.func (ps.map (·.ty)) retTy)) →
-    (∀ i (hi : i < bindings.length), Γ (bindings[i]'hi).1 = none) →
-    (∀ i j (hi : i < bindings.length) (hj : j < bindings.length), i ≠ j → (bindings[i]'hi).1 ≠ (bindings[j]'hj).1) →
     (∀ j (hj : j < bindings.length), F (bindings[j]'hj).1 = none) →
     (∀ j (hj : j < bindings.length) p, p ∈ (bindings[j]'hj).2.1 → F p.binder = none) →
     (∀ i (h : i < bindings.length),
@@ -325,7 +316,6 @@ inductive HasType :
   /-- Switch on constructors: all branches (and default) must have type τ. -/
   | switchConstr :
     HasType Γ Δ Λ F E obj (.constr tid ats) →
-    (∀ tag (x : Var) branch, findConstrCase cases tag = some (some x, branch) → Γ x = none) →
     (∀ tag binder branch, findConstrCase cases tag = some (binder, branch) →
       HasType (match binder with
         | some x => TyEnv.extend Γ x (.constr tid ats)
@@ -343,8 +333,6 @@ inductive HasType :
   -- ═══════════ Loops ═══════════
 
   | loop :
-    Λ label = none →
-    (∀ p, p ∈ params → Γ p.binder = none) →
     (∀ p, p ∈ params → F p.binder = none) →
     HasTypeArgs Γ Δ Λ F E argExprs (params.map (·.ty)) →
     HasType (TyEnv.bindParams Γ params) Δ
