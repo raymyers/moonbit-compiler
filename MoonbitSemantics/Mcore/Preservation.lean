@@ -1061,7 +1061,9 @@ theorem loc_store_consistency
     {s : Store} {fields : Array Value} {mutFlags : Array Bool}
     {F : FnTyTable}
     (hvt : ValueHasType (.loc l) (.constr tid ats))
-    (hstore : s l = some (.record fields mutFlags)) :
+    (hstore : s l = some (.record fields mutFlags))
+    (hclos : ∀ i (hf : i < fields.size) (hτ : i < ats.length),
+        ValClosureOk (fields[i]'hf) (ats[i]'hτ) F) :
     fields.size = ats.length ∧
     ∀ i (hf : i < fields.size) (hτ : i < ats.length),
       ValueHasType (fields[i]'hf) (ats[i]'hτ) ∧
@@ -1070,7 +1072,7 @@ theorem loc_store_consistency
     match hvt with
     | .locConstr hsize_fn htyped_fn =>
       exact ⟨hsize_fn s fields mutFlags hstore,
-        fun i hf hτ => ⟨htyped_fn s fields mutFlags hstore i hf hτ, sorry⟩⟩
+        fun i hf hτ => ⟨htyped_fn s fields mutFlags hstore i hf hτ, hclos i hf hτ⟩⟩
 
 set_option maxHeartbeats 3200000 in
 set_option maxRecDepth 1024 in
@@ -1385,7 +1387,7 @@ def preservation
       have pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc
       have hvt_loc := pr.hasType.getVal
       -- Use loc_store_consistency to bridge from ValueHasType to field typing
-      have ⟨hsize, htyped⟩ := loc_store_consistency (F := F) hvt_loc hstore
+      have ⟨hsize, htyped⟩ := loc_store_consistency (F := F) hvt_loc hstore (by sorry)
       exact fieldRecord_from_storeWT hsize htyped hfield hpos
     | .fieldTuple htype_rec _ =>
       let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc
