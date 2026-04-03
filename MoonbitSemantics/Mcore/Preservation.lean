@@ -24,7 +24,8 @@ to lift body typings from sub-environments to current environments.
 ANF freshness obligations are now discharged via eval-rule freshness premises
 (env freshness → Γ freshness via EnvWellTyped, lt freshness → Λ freshness via
 LoopLabelConsistent). The only remaining sorry is:
-- `store_consistent_axiom`: store typing consistency (orthogonal concern).
+- Store typing at `fieldRecord`: proving StoreWellTyped s' σ F (orthogonal concern;
+  requires threading StoreWellTyped through preservation as input/output invariant).
 
 Eval rules include ANF freshness fields (env name = none, jt name = none, lt label = none,
 env bindings fresh, etc.) to provide runtime evidence for freshness. -/
@@ -83,15 +84,6 @@ def StoreWellTyped (s : Store) (σ : StoreTyping) (F : FnTyTable) : Prop :=
         ValueHasType (fields[i]'hf) (argTypes[i]'hτ) ∧
         ValClosureOk (fields[i]'hf) (argTypes[i]'hτ) F
 
-/-- Store typing consistency: the runtime store maintains well-typedness
-    with respect to all store typings and function tables.
-    Defined as a top-level axiom to avoid adding parameters to the mutual
-    preservation block (which would break Lean's structural recursion checker).
-    To eliminate this axiom, thread StoreWellTyped through the full preservation
-    proof as an input/output parameter alongside PresResult. -/
-private theorem store_consistent_axiom (s : Store) (σ : StoreTyping) (F : FnTyTable) :
-    StoreWellTyped s σ F :=
-  fun _ _ _ => sorry
 
 /-- Store typing monotonicity: σ₁ ⊆ σ₂ means σ₂ extends σ₁. -/
 def StoreTypingMono (σ₁ σ₂ : StoreTyping) : Prop :=
@@ -1375,11 +1367,12 @@ def preservation
       | .locConstr (σ := σ) hσ =>
         -- hσ : σ l = some argTypes, hstore : s' l = some (.record fields _)
         -- hfield : fields[pos]? = some v, hpos : argTypes[pos]? = some fieldTy
-        -- Store typing consistency: the store σ from locConstr is consistent with s'.
-        -- This requires full store typing threading through the preservation theorem,
-        -- which is an orthogonal concern to the main type preservation proof.
-        -- We axiomatize it: the runtime store maintains well-typedness wrt σ and F.
-        have hswt : StoreWellTyped s' σ F := store_consistent_axiom s' σ F
+        -- Store typing: the runtime store s' is well-typed under the store typing σ
+        -- from locConstr. Eliminating this sorry requires threading StoreWellTyped
+        -- through preservation as an input/output invariant, proving that each
+        -- evaluation step preserves store well-typedness (store grows monotonically
+        -- with type-correct allocations, existing entries are never modified).
+        have hswt : StoreWellTyped s' σ F := by sorry
         obtain ⟨fields', mutFlags', hstore', hsize, htyped⟩ := hswt _ _ hσ
         rw [hstore] at hstore'; cases hstore'
         -- Extract field typing from StoreWellTyped evidence
