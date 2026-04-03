@@ -174,6 +174,7 @@ inductive Eval (fnTable : FnTable) :
   -- ══════════════════════════════════════════════════════════════════
 
   | «let» :
+    env name = none →
     Eval fnTable env s jt lt nl rhs (.val v₁) s₁ nl₁ →
     Eval fnTable (Env.extend env name v₁) s₁ jt lt nl₁ body outcome s₂ nl₂ →
     Eval fnTable env s jt lt nl (.let name rhs body) outcome s₂ nl₂
@@ -201,21 +202,25 @@ inductive Eval (fnTable : FnTable) :
   -- ══════════════════════════════════════════════════════════════════
 
   | letfnNonrec :
+    env name = none →
     Eval fnTable (Env.extend env name (.closure env params fnBody))
       s jt lt nl body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letfn name params fnBody body .nonRecursive) outcome s₁ nl₁
 
   | letfnRec :
+    env name = none →
     recEnv = Env.extend env name (.closure recEnv params fnBody) →
     Eval fnTable recEnv s jt lt nl body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letfn name params fnBody body .recursive) outcome s₁ nl₁
 
   | letfnTailJoin :
+    jt name = none →
     Eval fnTable env s (JoinTable.extend jt name ⟨params, fnBody⟩) lt nl
       body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letfn name params fnBody body .tailJoin) outcome s₁ nl₁
 
   | letfnNontailJoin :
+    jt name = none →
     Eval fnTable env s (JoinTable.extend jt name ⟨params, fnBody⟩) lt nl
       body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letfn name params fnBody body .nontailJoin) outcome s₁ nl₁
@@ -452,6 +457,7 @@ inductive Eval (fnTable : FnTable) :
   | switchConstr :
     Eval fnTable env s jt lt nl obj (.val (.constr tag args)) s₁ nl₁ →
     findConstrCase cases tag = some (binder, branch) →
+    (∀ x, binder = some x → env x = none) →
     Eval fnTable
       (match binder with
         | some x => Env.extend env x (.constr tag args)

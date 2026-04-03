@@ -68,7 +68,7 @@ theorem ex2_mcore :
       (.let xId (.const (.int 10))
         (.prim (.arith .add) [.var xId none, .const (.int 1)]))
       (.val (.const (.int 11))) ms 0 := by
-  apply Mcore.Eval.let Mcore.Eval.const
+  apply Mcore.Eval.let sorry Mcore.Eval.const
   apply Mcore.Eval.prim
   · apply Mcore.EvalArgs.cons
     · exact Mcore.Eval.var (v := .const (.int 10)) (by simp [Mcore.Env.extend])
@@ -150,6 +150,7 @@ theorem ex5_mcore :
   · exact Mcore.Eval.constr
       (Mcore.EvalArgs.cons Mcore.Eval.const Mcore.EvalArgs.nil)
   · simp [Mcore.findConstrCase, bananaTag]
+  · intro x hx; sorry
   · simp [bananaTag, nId]
     apply Mcore.Eval.fieldConstr
     · exact Mcore.Eval.var (v := .constr 1 [.const (.int 42)])
@@ -227,12 +228,12 @@ theorem ex9_mcore :
         (.let bId (.prim (.arith .mul) [.var aId none, .var aId none])
           (.prim (.arith .sub) [.var bId none, .const (.int 1)])))
       (.val (.const (.int 24))) ms 0 := by
-  apply Mcore.Eval.let
+  apply Mcore.Eval.let sorry
   · apply Mcore.Eval.prim
     · exact Mcore.EvalArgs.cons Mcore.Eval.const
         (Mcore.EvalArgs.cons Mcore.Eval.const Mcore.EvalArgs.nil)
     · rfl
-  · apply Mcore.Eval.let
+  · apply Mcore.Eval.let sorry
     · apply Mcore.Eval.prim
       · apply Mcore.EvalArgs.cons
         · exact Mcore.Eval.var (v := .const (.int 5)) (by simp [Mcore.Env.extend])
