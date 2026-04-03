@@ -233,6 +233,9 @@ inductive Eval (fnTable : FnTable) :
   | letrec :
     recEnv = Env.extendMany env
       (bindings.map fun (v, ps, b) => (v, Value.closure recEnv ps b)) →
+    (∀ i (hi : i < bindings.length), env (bindings[i]'hi).1 = none) →
+    (∀ i j (hi : i < bindings.length) (hj : j < bindings.length),
+      i ≠ j → (bindings[i]'hi).1 ≠ (bindings[j]'hj).1) →
     Eval fnTable recEnv s jt lt nl body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letrec bindings body) outcome s₁ nl₁
 
@@ -269,6 +272,7 @@ inductive Eval (fnTable : FnTable) :
     jt func = some ⟨params, jbody⟩ →
     EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
     params.length = argVals.length →
+    (∀ p, p ∈ params → env p.binder = none) →
     Eval fnTable (Env.bindParams env params argVals)
       s₁ jt lt nl₁ jbody outcome sr nlr →
     Eval fnTable env s jt lt nl (.apply func argExprs .join) outcome sr nlr
@@ -499,6 +503,8 @@ inductive Eval (fnTable : FnTable) :
 
   /-- Loop body returns a value → loop terminates. -/
   | loopVal :
+    lt label = none →
+    (∀ p, p ∈ params → env p.binder = none) →
     EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
     Eval fnTable (Env.bindParams env params argVals) s₁ jt
       (LoopTable.extend lt label ⟨params, body⟩) nl₁ body (.val v) sr nlr →
@@ -506,6 +512,8 @@ inductive Eval (fnTable : FnTable) :
 
   /-- Loop body breaks with value → loop terminates with that value. -/
   | loopBreak :
+    lt label = none →
+    (∀ p, p ∈ params → env p.binder = none) →
     EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
     Eval fnTable (Env.bindParams env params argVals) s₁ jt
       (LoopTable.extend lt label ⟨params, body⟩) nl₁ body (.break (some v) label) sr nlr →
@@ -513,6 +521,8 @@ inductive Eval (fnTable : FnTable) :
 
   /-- Loop body breaks with none → loop terminates with unit. -/
   | loopBreakNone :
+    lt label = none →
+    (∀ p, p ∈ params → env p.binder = none) →
     EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
     Eval fnTable (Env.bindParams env params argVals) s₁ jt
       (LoopTable.extend lt label ⟨params, body⟩) nl₁ body (.break none label) sr nlr →
@@ -520,6 +530,8 @@ inductive Eval (fnTable : FnTable) :
 
   /-- Loop body continues → re-enter loop via LoopReentry (catches breaks properly). -/
   | loopContinue :
+    lt label = none →
+    (∀ p, p ∈ params → env p.binder = none) →
     EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
     Eval fnTable (Env.bindParams env params argVals) s₁ jt
       (LoopTable.extend lt label ⟨params, body⟩) nl₁ body (.continue newVals label) s₂ nl₂ →
@@ -529,12 +541,16 @@ inductive Eval (fnTable : FnTable) :
 
   /-- Loop body returns/errors → propagate past loop. -/
   | loopReturn :
+    lt label = none →
+    (∀ p, p ∈ params → env p.binder = none) →
     EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
     Eval fnTable (Env.bindParams env params argVals) s₁ jt
       (LoopTable.extend lt label ⟨params, body⟩) nl₁ body (.return v) sr nlr →
     Eval fnTable env s jt lt nl (.loop params body argExprs label) (.return v) sr nlr
 
   | loopError :
+    lt label = none →
+    (∀ p, p ∈ params → env p.binder = none) →
     EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
     Eval fnTable (Env.bindParams env params argVals) s₁ jt
       (LoopTable.extend lt label ⟨params, body⟩) nl₁ body (.error v) sr nlr →
@@ -620,6 +636,7 @@ inductive Eval (fnTable : FnTable) :
   | handleErrorJoinErr :
     Eval fnTable env s jt lt nl obj (.error v) s₁ nl₁ →
     jt target = some ⟨jparams, jbody⟩ →
+    (∀ p, p ∈ jparams → env p.binder = none) →
     Eval fnTable (Env.bindParams env jparams [v]) s₁ jt lt nl₁ jbody outcome sr nlr →
     Eval fnTable env s jt lt nl (.handleError obj (.joinapply target)) outcome sr nlr
 

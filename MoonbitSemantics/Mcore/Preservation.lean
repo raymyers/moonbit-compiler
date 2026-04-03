@@ -21,15 +21,13 @@ JoinWellTyped uses existential sub-environments: each join body is typed under
 requires hfresh after removing Γ/Δ/Λ freshness fields from HasType constructors)
 to lift body typings from sub-environments to current environments.
 
-This file has 0 sorry. ANF freshness obligations and store typing consistency
-are handled via axioms:
-- `anf_extendMany_freshness`: letrec binding names are fresh and pairwise distinct.
-- `anf_bindParams_freshness`: param binders are fresh in the typing environment.
-- `anf_loop_label_freshness`: loop labels are fresh in the loop typing environment.
+ANF freshness obligations are now discharged via eval-rule freshness premises
+(env freshness → Γ freshness via EnvWellTyped, lt freshness → Λ freshness via
+LoopLabelConsistent). The only remaining sorry is:
 - `store_consistent_axiom`: store typing consistency (orthogonal concern).
 
-Eval rules include ANF freshness fields (env name = none, jt name = none, etc.)
-to provide runtime evidence for freshness at let/letfn/switchConstr sites. -/
+Eval rules include ANF freshness fields (env name = none, jt name = none, lt label = none,
+env bindings fresh, etc.) to provide runtime evidence for freshness. -/
 
 /-- Freshness propagation for TyEnv.extend: names ≠ the extension name stay absent. -/
 theorem TyEnv.extend_fresh {Γ : TyEnv} {name : Var} {τ : Mtype} :
@@ -850,23 +848,17 @@ private theorem TyEnv.extendMany_sub_of_fresh
       · subst hx; rw [hfresh0] at h; exact nomatch h
       · simp [hx]; exact h
 
-/-- ANF freshness axiom: letrec binding names are fresh in the current typing
-    environment and pairwise distinct. Required for Γ monotonicity through extendMany. -/
-private theorem anf_extendMany_freshness (Γ : TyEnv) (bindings : List (Var × Mtype)) :
-    (∀ i (hi : i < bindings.length), Γ (bindings[i]'hi).1 = none) ∧
-    (∀ i j (hi : i < bindings.length) (hj : j < bindings.length),
-      i ≠ j → (bindings[i]'hi).1 ≠ (bindings[j]'hj).1)
-  := ⟨sorry, sorry⟩
-
 /-- Γ weakening for JoinWellTyped: extendMany with fresh names. -/
 theorem JoinWellTyped.weakenΓ_extendMany
-    (hjwt : JoinWellTyped jt Δ Γ Λ F) :
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hfresh : ∀ i (hi : i < bindings.length), Γ (bindings[i]'hi).1 = none)
+    (hdist : ∀ i j (hi : i < bindings.length) (hj : j < bindings.length),
+      i ≠ j → (bindings[i]'hi).1 ≠ (bindings[j]'hj).1) :
     JoinWellTyped jt Δ (TyEnv.extendMany Γ bindings) Λ F := by
   intro func params jbody paramTys retTy hjt' hΔ
   obtain ⟨hmap, hfp, Γ_def, Δ_def, Λ_def, hΓsub, hΔsub, hΛsub, hbody⟩ :=
     hjwt func params jbody paramTys retTy hjt' hΔ
   refine ⟨hmap, hfp, Γ_def, Δ_def, Λ_def, fun x τ' h => ?_, hΔsub, hΛsub, hbody⟩
-  obtain ⟨hfresh, hdist⟩ := anf_extendMany_freshness Γ bindings
   exact TyEnv.extendMany_sub_of_fresh hfresh hdist (hΓsub x τ' h)
 
 /-- If all param binders are fresh in Γ, then Γ ⊆ TyEnv.bindParams Γ params. -/
@@ -893,20 +885,16 @@ private theorem TyEnv.bindParams_sub_of_fresh
       simp [TyEnv.extend, hne_p]; exact h₀
     exact ih _ (fun q hq => hne₀ q (List.mem_cons_of_mem p hq)) h₁
 
-/-- ANF freshness axiom: parameter binders are fresh in the current typing environment. -/
-private theorem anf_bindParams_freshness (Γ : TyEnv) (params : List Param) :
-    ∀ p, p ∈ params → Γ p.binder = none :=
-  fun _ _ => sorry
-
 /-- Γ weakening for JoinWellTyped: bindParams. -/
 theorem JoinWellTyped.weakenΓ_bindParams
-    (hjwt : JoinWellTyped jt Δ Γ Λ F) :
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hpfresh : ∀ p, p ∈ params → Γ p.binder = none) :
     JoinWellTyped jt Δ (TyEnv.bindParams Γ params) Λ F := by
   intro func params' jbody paramTys retTy hjt' hΔ
   obtain ⟨hmap, hfp, Γ_def, Δ_def, Λ_def, hΓsub, hΔsub, hΛsub, hbody⟩ :=
     hjwt func params' jbody paramTys retTy hjt' hΔ
   refine ⟨hmap, hfp, Γ_def, Δ_def, Λ_def, fun x τ' h => ?_, hΔsub, hΛsub, hbody⟩
-  exact TyEnv.bindParams_sub_of_fresh (anf_bindParams_freshness Γ params) (hΓsub x τ' h)
+  exact TyEnv.bindParams_sub_of_fresh hpfresh (hΓsub x τ' h)
 
 /-- Γ weakening for JoinWellTyped: switchConstr binder.
     When binder = some x, uses the freshness proof Γ x = none. -/
@@ -932,19 +920,37 @@ theorem JoinWellTyped.strengthen_Λ
   exact ⟨hmap, hfp, Γ_def, Δ_def, Λ_def, hΓsub, hΔsub,
     fun l e h => hsub _ _ (hΛsub l e h), hbody⟩
 
-/-- ANF freshness axiom: loop labels are fresh in the loop typing environment. -/
-private theorem anf_loop_label_freshness (Λ : LoopTyEnv) (label : LoopLabel) :
-    Λ label = none :=
-  sorry
+/-- LoopLabelConsistent: every entry in Λ has a corresponding entry in lt. -/
+def LoopLabelConsistent (lt : LoopTable) (Λ : LoopTyEnv) : Prop :=
+  ∀ label entry, Λ label = some entry → ∃ params body, lt label = some ⟨params, body⟩
+
+/-- LoopLabelConsistent holds vacuously for empty lt/Λ. -/
+theorem LoopLabelConsistent.empty : LoopLabelConsistent LoopTable.empty LoopTyEnv.empty :=
+  fun _ _ h => absurd h (by simp [LoopTyEnv.empty])
+
+/-- Extending lt and Λ together preserves LoopLabelConsistent. -/
+theorem LoopLabelConsistent.extend
+    (hllc : LoopLabelConsistent lt Λ)
+    (hlt_fresh : lt label = none) :
+    LoopLabelConsistent (LoopTable.extend lt label ⟨params, body⟩)
+      (LoopTyEnv.extend Λ label entry) := by
+  intro l e hΛ
+  simp [LoopTyEnv.extend] at hΛ
+  by_cases hl : l = label
+  · subst hl; exact ⟨params, body, by simp [LoopTable.extend]⟩
+  · simp [hl] at hΛ; obtain ⟨p, b, hpb⟩ := hllc l e hΛ
+    exact ⟨p, b, by simp [LoopTable.extend, hl]; exact hpb⟩
 
 /-- Γ+Λ weakening for loop: combines bindParams weakening with Λ extension. -/
 theorem JoinWellTyped.weakenΓΛ_loop
-    (hjwt : JoinWellTyped jt Δ Γ Λ F) :
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hpfresh : ∀ p, p ∈ params → Γ p.binder = none)
+    (hΛfresh : Λ label = none) :
     JoinWellTyped jt Δ (TyEnv.bindParams Γ params) (LoopTyEnv.extend Λ label entry) F :=
-  (hjwt.weakenΓ_bindParams).strengthen_Λ (fun l e h => by
+  (hjwt.weakenΓ_bindParams hpfresh).strengthen_Λ (fun l e h => by
     simp [LoopTyEnv.extend]
     by_cases hl : l = label
-    · subst hl; have := anf_loop_label_freshness Λ l; rw [this] at h; exact nomatch h
+    · subst hl; rw [hΛfresh] at h; exact nomatch h
     · simp [hl]; exact h)
 
 /-- Δ monotonicity for JoinTyEnv.extend, given Δ name = none. -/
@@ -1067,15 +1073,16 @@ def preservationArgs
     (hdisj : FnEnvDisjoint env F)
     (hftc : FnTableComplete ft F)
     (hjwt : JoinWellTyped jt Δ Γ Λ F)
-    (hjdc : JoinDeltaConsistent jt Δ) :
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ) :
     ArgsPresResult vs τs F :=
   match htypes, hevals with
   | .nil, .nil => ⟨.nil, fun i hv _ => absurd hv (by simp)⟩
   | .cons htype htypes', .cons heval hrest =>
-    let pr := preservation htype heval henv hft hcinv hdisj hftc hjwt hjdc
+    let pr := preservation htype heval henv hft hcinv hdisj hftc hjwt hjdc hllc
     let hvt := pr.hasType.getVal
     let hcl := pr.closureOk _ rfl
-    let rest := preservationArgs htypes' hrest henv hft hcinv hdisj hftc hjwt hjdc
+    let rest := preservationArgs htypes' hrest henv hft hcinv hdisj hftc hjwt hjdc hllc
     ⟨.cons hvt rest.hasTypes, fun i hv hτ =>
       match i with
       | 0 => hcl
@@ -1092,13 +1099,14 @@ def preservationArgsAbort
     (hdisj : FnEnvDisjoint env F)
     (hftc : FnTableComplete ft F)
     (hjwt : JoinWellTyped jt Δ Γ Λ F)
-    (hjdc : JoinDeltaConsistent jt Δ) :
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ) :
     PresResult outcome τ_result E F Λ :=
   match htypes, habort with
   | .cons htype _, .here heval hab =>
-    (preservation htype heval henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    (preservation htype heval henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .cons _ htypes', .later _ hrest =>
-    preservationArgsAbort htypes' hrest henv hft hcinv hdisj hftc hjwt hjdc
+    preservationArgsAbort htypes' hrest henv hft hcinv hdisj hftc hjwt hjdc hllc
 
 /-- **Type Preservation**: well-typed expressions evaluate to well-typed outcomes.
 
@@ -1112,7 +1120,8 @@ def preservation
     (hdisj : FnEnvDisjoint env F)
     (hftc : FnTableComplete ft F)
     (hjwt : JoinWellTyped jt Δ Γ Λ F)
-    (hjdc : JoinDeltaConsistent jt Δ) :
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ) :
     PresResult outcome τ E F Λ :=
   match heval with
   -- ════════ Leaf cases ════════
@@ -1137,72 +1146,72 @@ def preservation
 
   -- ════════ All abort propagation (use IH + weaken) ════════
   | .letAbort heval_rhs hab => match htype with
-    | .let _ htype_rhs _ => (preservation htype_rhs heval_rhs henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    | .let _ htype_rhs _ => (preservation htype_rhs heval_rhs henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .assignAbort heval_e hab => match htype with
-    | .assign _ htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    | .assign _ htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .mutateAbortRec heval_rec hab => match htype with
-    | .mutate htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    | .mutate htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .mutateAbortFld heval_rec heval_fld hab => match htype with
-    | .mutate _ htype_fld => (preservation htype_fld heval_fld henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    | .mutate _ htype_fld => (preservation htype_fld heval_fld henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .fieldAbort heval_rec hab => match htype with
-    | .fieldTuple htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
-    | .fieldHeap htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    | .fieldTuple htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
+    | .fieldHeap htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .ifAbort heval_cond hab => match htype with
-    | .ifSome htype_cond _ _ => (preservation htype_cond heval_cond henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
-    | .ifNone htype_cond _ => (preservation htype_cond heval_cond henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    | .ifSome htype_cond _ _ => (preservation htype_cond heval_cond henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
+    | .ifNone htype_cond _ => (preservation htype_cond heval_cond henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .switchConstrAbort heval_obj hab => match htype with
-    | .switchConstr htype_obj _ _ => (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    | .switchConstr htype_obj _ _ => (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .switchConstantAbort heval_obj hab => match htype with
-    | .switchConstant htype_obj _ _ => (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    | .switchConstant htype_obj _ _ => (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .returnAbort heval_e hab => match htype with
-    | .returnSingle htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
-    | .returnOk htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
-    | .returnErr _ htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    | .returnSingle htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
+    | .returnOk htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
+    | .returnErr _ htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .breakAbort heval_arg hab => match htype with
-    | .break _ htype_arg => (preservation htype_arg heval_arg henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    | .break _ htype_arg => (preservation htype_arg heval_arg henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .objectAbort heval_self hab => match htype with
-    | .object htype_self => (preservation htype_self heval_self henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    | .object htype_self => (preservation htype_self heval_self henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .andAbort heval_lhs hab => match htype with
-    | .and htype_lhs _ => (preservation htype_lhs heval_lhs henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    | .and htype_lhs _ => (preservation htype_lhs heval_lhs henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .orAbort heval_lhs hab => match htype with
-    | .or htype_lhs _ => (preservation htype_lhs heval_lhs henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    | .or htype_lhs _ => (preservation htype_lhs heval_lhs henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .recordUpdateAbortRec heval_rec hab => match htype with
-    | .recordUpdate htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc).weaken hab
+    | .recordUpdate htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   -- EvalArgsAbort cases: propagate break info through preservationArgsAbort
   | .constrAbort h => match htype with
-    | .constr htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc
+    | .constr htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc hllc
   | .tupleAbort h => match htype with
-    | .tuple htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc
+    | .tuple htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc hllc
   | .recordAbort h => match htype with
-    | .record htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc
+    | .record htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc hllc
   | .arrayAbort h => match htype with
-    | .array htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc
+    | .array htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc hllc
   | .recordUpdateAbortFields _ _ h => match htype with
-    | .recordUpdate _ htype_fields => preservationArgsAbort htype_fields h henv hft hcinv hdisj hftc hjwt hjdc
+    | .recordUpdate _ htype_fields => preservationArgsAbort htype_fields h henv hft hcinv hdisj hftc hjwt hjdc hllc
   | .primAbort h => match htype with
-    | .prim htype_args _ => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc
+    | .prim htype_args _ => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc hllc
   | .applyAbort h => match htype with
-    | .applyClosure _ htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc
-    | .applyRawFn _ htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc
-    | .applyTopFn _ htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc
-    | .applyJoin _ htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc
+    | .applyClosure _ htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc hllc
+    | .applyRawFn _ htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc hllc
+    | .applyTopFn _ htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc hllc
+    | .applyJoin _ htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc hllc
   | .seqAbort h => match htype with
-    | .seq htype_exprs _ => preservationArgsAbort htype_exprs h henv hft hcinv hdisj hftc hjwt hjdc
+    | .seq htype_exprs _ => preservationArgsAbort htype_exprs h henv hft hcinv hdisj hftc hjwt hjdc hllc
   | .loopAbort h => match htype with
-    | .loop _ htype_args _ => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc
+    | .loop _ htype_args _ => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc hllc
   | .continueAbort h => match htype with
-    | .continue _ htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc
+    | .continue _ htype_args => preservationArgsAbort htype_args h henv hft hcinv hdisj hftc hjwt hjdc hllc
 
   -- ════════ Break / continue ════════
   | .breakSome heval_arg => match htype with
     | .break hΛ htype_arg =>
-      let pr := preservation htype_arg heval_arg henv hft hcinv hdisj hftc hjwt hjdc
+      let pr := preservation htype_arg heval_arg henv hft hcinv hdisj hftc hjwt hjdc hllc
       .breakSome' (pr.hasType.getVal) (pr.closureOk _ rfl) hΛ
   | .breakNone => match htype with
     | .breakNone hΛ => .breakNone' hΛ
   | .continue heval_args => match htype with
     | .continue hΛ htype_args =>
-      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
       .continue' hΛ apr.hasTypes apr.closureOks
 
   -- ════════ Simple value-producing cases ════════
@@ -1212,7 +1221,7 @@ def preservation
     | .mutate _ _ => .val' .unit (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
   | .constr heval_args => match htype with
     | .constr htype_args =>
-      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
       .val' (.constr apr.hasTypes) (.constr apr.closureOks)
   | .record _ => match htype with
     | .record _ => .val' (.locConstr (σ := fun _ => some _) rfl) (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
@@ -1231,13 +1240,13 @@ def preservation
 
   | .let henv_fresh heval_rhs heval_body => match htype with
     | .let hFname htype_rhs htype_body =>
-      let pr := preservation htype_rhs heval_rhs henv hft hcinv hdisj hftc hjwt hjdc
+      let pr := preservation htype_rhs heval_rhs henv hft hcinv hdisj hftc hjwt hjdc hllc
       let hvt := pr.hasType.getVal
       let hcl := pr.closureOk _ rfl
       let henv' := EnvWellTyped.extend_preserves henv hvt
       let hcinv' := ClosureInvariant.extend hcinv hcl
       preservation htype_body heval_body henv' hft hcinv' (hdisj.extend hFname) hftc
-        (hjwt.weakenΓ_extend (EnvWellTyped.env_none_Γ_none henv henv_fresh)) hjdc
+        (hjwt.weakenΓ_extend (EnvWellTyped.env_none_Γ_none henv henv_fresh)) hjdc hllc
 
   | .letfnNonrec henv_fresh heval_body => match htype with
     | .letfnNonrec hFname hparams htype_fn htype_body =>
@@ -1245,7 +1254,7 @@ def preservation
       let henv' := EnvWellTyped.extend_preserves henv ValueHasType.closure
       let hcinv' := ClosureInvariant.extend hcinv hcl
       preservation htype_body heval_body henv' hft hcinv' (hdisj.extend hFname) hftc
-        (hjwt.weakenΓ_extend (EnvWellTyped.env_none_Γ_none henv henv_fresh)) hjdc
+        (hjwt.weakenΓ_extend (EnvWellTyped.env_none_Γ_none henv henv_fresh)) hjdc hllc
 
   | .letfnRec henv_fresh hrecEnv_eq heval_body => match htype with
     | .letfnRec hFname hparams htype_fn htype_body =>
@@ -1254,7 +1263,7 @@ def preservation
       let henv' := hrecEnv_eq ▸ EnvWellTyped.extend_preserves henv ValueHasType.closure
       let hcinv' := hrecEnv_eq ▸ ClosureInvariant.extend hcinv hcl
       preservation htype_body heval_body henv' hft hcinv' (hrecEnv_eq ▸ hdisj.extend hFname) hftc
-        (hjwt.weakenΓ_extend (EnvWellTyped.env_none_Γ_none henv henv_fresh)) hjdc
+        (hjwt.weakenΓ_extend (EnvWellTyped.env_none_Γ_none henv henv_fresh)) hjdc hllc
 
   | .letfnTailJoin (name := name) (params := params) (fnBody := fnBody)
       hjt_fresh heval_body => match htype with
@@ -1266,7 +1275,7 @@ def preservation
         · simp [h] at hΔ; obtain ⟨p, b, hpb⟩ := hjdc n e hΔ
           exact ⟨p, b, by simp [JoinTable.extend, h]; exact hpb⟩
       preservation htype_body heval_body henv hft hcinv hdisj hftc
-        (hjwt.extend_tail htype_fn hfparams rfl hjt_fresh hjdc) hjdc'
+        (hjwt.extend_tail htype_fn hfparams rfl hjt_fresh hjdc) hjdc' hllc
 
   | .letfnNontailJoin (name := name) (params := params) (fnBody := fnBody)
       hjt_fresh heval_body => match htype with
@@ -1278,23 +1287,41 @@ def preservation
         · simp [h] at hΔ; obtain ⟨p, b, hpb⟩ := hjdc n e hΔ
           exact ⟨p, b, by simp [JoinTable.extend, h]; exact hpb⟩
       preservation htype_body heval_body henv hft hcinv hdisj hftc
-        (hjwt.extend_nontail htype_fn hfparams rfl hjt_fresh hjdc) hjdc'
+        (hjwt.extend_nontail htype_fn hfparams rfl hjt_fresh hjdc) hjdc' hllc
 
-  | .letrec hrecEnv_eq heval_body => match htype with
+  | .letrec hrecEnv_eq henv_fresh hdist heval_body => match htype with
     | .letrec (bindings := bindings) (retTy := retTy) hrecΓ_eq hFnames hFparams hbodies htype_body => by
-      refine preservation htype_body heval_body ?_ hft ?_ ?_ hftc (hrecΓ_eq ▸ hjwt.weakenΓ_extendMany) hjdc
+      -- Derive Γ freshness from env freshness + EnvWellTyped
+      have hΓ_fresh_env : ∀ i (hi : i < bindings.length), Γ (bindings[i]'hi).1 = none :=
+        fun i hi => EnvWellTyped.env_none_Γ_none henv (henv_fresh i hi)
+      -- The type bindings list for extendMany
+      set tyBindings := (bindings.map Prod.fst).zip
+        (bindings.map fun (_, ps, _) => Mtype.func (ps.map Param.ty) retTy) with htyBind_def
+      have htyBind_len : tyBindings.length = bindings.length := by
+        simp [tyBindings, List.length_zip, List.length_map]
+      have htyBind_fst : ∀ i (hi : i < tyBindings.length),
+          (tyBindings[i]'hi).1 = (bindings[i]'(by omega)).1 := by
+        intro i hi
+        simp [tyBindings, List.getElem_zip, List.getElem_map, show i < bindings.length by omega]
+      have hΓ_fresh : ∀ i (hi : i < tyBindings.length), Γ (tyBindings[i]'hi).1 = none := by
+        intro i hi; rw [htyBind_fst i hi]; exact hΓ_fresh_env i (by omega)
+      have hΓ_dist : ∀ i j (hi : i < tyBindings.length) (hj : j < tyBindings.length),
+          i ≠ j → (tyBindings[i]'hi).1 ≠ (tyBindings[j]'hj).1 := by
+        intro i j hi hj hij; rw [htyBind_fst i hi, htyBind_fst j hj]
+        exact hdist i j (by omega) (by omega) hij
+      refine preservation htype_body heval_body ?_ hft ?_ ?_ hftc (hrecΓ_eq ▸ hjwt.weakenΓ_extendMany hΓ_fresh hΓ_dist) hjdc hllc
       · -- EnvWellTyped recEnv recΓ
         rw [hrecEnv_eq, hrecΓ_eq]
         apply EnvWellTyped.extendMany_preserves henv
-        case hlen => simp [List.length_map, List.length_zip]
-        case hnames => intro i hi; simp [List.getElem_map]
-        case htypes => intro i hi; simp [List.getElem_map]; exact ValueHasType.closure
+        case hlen => simp [List.length_map, List.length_zip]; omega
+        case hnames => intro i hi; simp [tyBindings, List.getElem_zip, List.getElem_map, show i < bindings.length by simp [tyBindings, List.length_zip, List.length_map] at hi; omega]
+        case htypes => intro i hi; simp [tyBindings, List.getElem_zip, List.getElem_map, show i < bindings.length by simp [tyBindings, List.length_zip, List.length_map] at hi; omega]; exact ValueHasType.closure
       · -- ClosureInvariant recEnv recΓ F
         rw [hrecEnv_eq, hrecΓ_eq]
         apply ClosureInvariant.extendMany (fun x v τ h1 h2 => hcinv x v τ h1 h2)
-        case hlen => simp [List.length_map, List.length_zip]
-        case hnames => intro i hi; simp [List.getElem_map]
-        case hclos => intro i hi; simp [List.getElem_map, List.length_map] at hi ⊢
+        case hlen => simp [List.length_map, List.length_zip]; omega
+        case hnames => intro i hi; simp [tyBindings, List.getElem_zip, List.getElem_map, show i < bindings.length by simp [tyBindings, List.length_zip, List.length_map] at hi; omega]
+        case hclos => intro i hi; simp [tyBindings, List.getElem_zip, List.getElem_map, List.length_zip, List.length_map] at hi ⊢
                       exact .recMutualClosure rfl hrecEnv_eq hrecΓ_eq hi rfl
                         henv hcinv hdisj hFnames hFparams hbodies
       · -- FnEnvDisjoint recEnv F
@@ -1303,45 +1330,45 @@ def preservation
         intro i hi; simp [List.length_map] at hi; simp [List.getElem_map]; exact hFnames i hi
 
   | .ifTrue heval_cond heval_so => match htype with
-    | .ifSome _ htype_so _ => preservation htype_so heval_so henv hft hcinv hdisj hftc hjwt hjdc
-    | .ifNone _ htype_so => preservation htype_so heval_so henv hft hcinv hdisj hftc hjwt hjdc
+    | .ifSome _ htype_so _ => preservation htype_so heval_so henv hft hcinv hdisj hftc hjwt hjdc hllc
+    | .ifNone _ htype_so => preservation htype_so heval_so henv hft hcinv hdisj hftc hjwt hjdc hllc
 
   | .ifFalse heval_cond heval_not => match htype with
-    | .ifSome _ _ htype_not => preservation htype_not heval_not henv hft hcinv hdisj hftc hjwt hjdc
+    | .ifSome _ _ htype_not => preservation htype_not heval_not henv hft hcinv hdisj hftc hjwt hjdc hllc
 
   | .andTrue heval_lhs heval_rhs => match htype with
-    | .and _ htype_rhs => preservation htype_rhs heval_rhs henv hft hcinv hdisj hftc hjwt hjdc
+    | .and _ htype_rhs => preservation htype_rhs heval_rhs henv hft hcinv hdisj hftc hjwt hjdc hllc
 
   | .orFalse heval_lhs heval_rhs => match htype with
-    | .or _ htype_rhs => preservation htype_rhs heval_rhs henv hft hcinv hdisj hftc hjwt hjdc
+    | .or _ htype_rhs => preservation htype_rhs heval_rhs henv hft hcinv hdisj hftc hjwt hjdc hllc
 
   | .seq heval_exprs heval_last => match htype with
-    | .seq _ htype_last => preservation htype_last heval_last henv hft hcinv hdisj hftc hjwt hjdc
+    | .seq _ htype_last => preservation htype_last heval_last henv hft hcinv hdisj hftc hjwt hjdc hllc
 
   | .fieldTuple heval_rec hfield => match htype with
     | .fieldTuple htype_rec hpos =>
-      let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc
+      let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc
       let .val (.tuple hvts) := pr.hasType
       let v_typed := hvts.getAt? _ hfield hpos
       .val' v_typed (ValClosureOk.tuple_getAt? (pr.closureOk _ rfl) hfield hpos)
     | .fieldHeap htype_rec _ =>
-      let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc
+      let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc
       let .val hvt := pr.hasType
       absurd hvt (by intro h; exact ValueHasType.tuple_not_constr h)
   | .fieldConstr heval_rec hfield => match htype with
     | .fieldHeap htype_rec hpos =>
-      let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc
+      let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc
       let .val (.constr hvl) := pr.hasType
       let v_typed := hvl.getAt? _ hfield hpos
       .val' v_typed (ValClosureOk.constr_getAt? (pr.closureOk _ rfl) hfield hpos)
     | .fieldTuple htype_rec _ =>
-      let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc
+      let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc
       let .val hvt := pr.hasType
       absurd hvt (by intro h; exact ValueHasType.constr_not_tuple h)
   | .fieldRecord heval_rec hstore hfield => match htype with
     | .fieldHeap htype_rec hpos => by
       -- IH: rec_ evaluates to .loc l with type .constr tid argTypes
-      have pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc
+      have pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc
       have hvt_loc := pr.hasType.getVal
       -- Pattern match on ValueHasType (.loc l) (.constr tid argTypes)
       match hvt_loc with
@@ -1358,18 +1385,18 @@ def preservation
         -- Extract field typing from StoreWellTyped evidence
         exact fieldRecord_from_storeWT hsize htyped hfield hpos
     | .fieldTuple htype_rec _ =>
-      let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc
+      let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc
       let .val hvt := pr.hasType
       absurd hvt (by intro h; exact ValueHasType.loc_not_tuple h)
 
   | .object heval_self => match htype with
-    | .object htype_self => preservation htype_self heval_self henv hft hcinv hdisj hftc hjwt hjdc
+    | .object htype_self => preservation htype_self heval_self henv hft hcinv hdisj hftc hjwt hjdc hllc
 
   -- ════════ Switch ════════
   | @Eval.switchConstr _ _ _ _ _ _ _ _ _ _ _ _ (some x) _ _ _ _ _ heval_obj hfind hbinder_fresh heval_branch =>
     match htype with
     | .switchConstr htype_obj htype_cases _ =>
-      let pr_obj := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc
+      let pr_obj := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc
       let hvt_obj := pr_obj.hasType.getVal
       let hcl_obj := pr_obj.closureOk _ rfl
       let htype_branch := htype_cases _ _ _ hfind
@@ -1377,28 +1404,28 @@ def preservation
         (switchConstrEnvWT (some x) henv hvt_obj) hft
         (switchConstrCInv (some x) hcinv hcl_obj)
         (switchConstrDisj (some x) hdisj _ _)
-        hftc (hjwt.weakenΓ_extend (EnvWellTyped.env_none_Γ_none henv (hbinder_fresh x rfl))) hjdc
+        hftc (hjwt.weakenΓ_extend (EnvWellTyped.env_none_Γ_none henv (hbinder_fresh x rfl))) hjdc hllc
   | @Eval.switchConstr _ _ _ _ _ _ _ _ _ _ _ _ none _ _ _ _ _ heval_obj hfind _ heval_branch =>
     match htype with
     | .switchConstr htype_obj htype_cases _ =>
-      let pr_obj := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc
+      let pr_obj := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc
       let htype_branch := htype_cases _ _ _ hfind
-      preservation htype_branch heval_branch henv hft hcinv hdisj hftc hjwt hjdc
+      preservation htype_branch heval_branch henv hft hcinv hdisj hftc hjwt hjdc hllc
   | .switchConstrDefault heval_obj hfind_none heval_dflt => match htype with
     | .switchConstr _ _ htype_dflt =>
-      preservation (htype_dflt _ rfl) heval_dflt henv hft hcinv hdisj hftc hjwt hjdc
+      preservation (htype_dflt _ rfl) heval_dflt henv hft hcinv hdisj hftc hjwt hjdc hllc
   | .switchConstantMatch heval_obj hfindcase heval_branch => match htype with
     | .switchConstant _ htype_cases _ =>
       let ⟨i, hi, hbranch_eq⟩ := findConstantCase_index _ _ _ hfindcase
       let htype_branch := htype_cases i hi
-      preservation (hbranch_eq ▸ htype_branch) heval_branch henv hft hcinv hdisj hftc hjwt hjdc
+      preservation (hbranch_eq ▸ htype_branch) heval_branch henv hft hcinv hdisj hftc hjwt hjdc hllc
   | .switchConstantDefault _ _ heval_dflt => match htype with
-    | .switchConstant _ _ htype_dflt => preservation htype_dflt heval_dflt henv hft hcinv hdisj hftc hjwt hjdc
+    | .switchConstant _ _ htype_dflt => preservation htype_dflt heval_dflt henv hft hcinv hdisj hftc hjwt hjdc hllc
 
   -- ════════ Prim ════════
   | .prim heval_args hprim => match htype with
     | .prim htype_args htype_prim =>
-      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
       -- evalPrim never produces closures, so ValClosureOk is trivially satisfied
       let hvt := evalPrim_type_sound' hprim apr.hasTypes htype_prim
       .val' hvt (evalPrim_valClosureOk hprim htype_prim apr.hasTypes apr.closureOks)
@@ -1410,7 +1437,7 @@ def preservation
       -- Extract from ValClosureOk.closure
       match cinv_func with
       | .closure hptys hcapWT hcapCinv hcapDisj hclosParams hbodyTyped =>
-        let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+        let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
         let hvts' := hptys ▸ apr.hasTypes
         let hlen_bp := by
           have := hvts'.length_eq; simp [List.length_map] at this; omega
@@ -1421,10 +1448,10 @@ def preservation
               subst hptys; simp [List.length_map]; exact hτ)
             exact hptys ▸ this)
         (preservation hbodyTyped heval_body henv_body hft hcinv_body
-          (FnEnvDisjoint.bindParams hcapDisj _ _ hclosParams) hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty).liftFromEmptyΛ.liftFromNoneE
+          (FnEnvDisjoint.bindParams hcapDisj _ _ hclosParams) hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty LoopLabelConsistent.empty).liftFromEmptyΛ.liftFromNoneE
       | .not_closure hnotcl _ _ _ => absurd rfl (hnotcl _ _ _)
       | .recClosure hptys hrecEnv hbaseWT hbaseInv hbaseDisj hFname hclosParams hbodyTyped =>
-        let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+        let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
         let hvts' := hptys ▸ apr.hasTypes
         let hlen_bp := by
           have := hvts'.length_eq; simp [List.length_map] at this; omega
@@ -1443,7 +1470,7 @@ def preservation
               subst hptys; simp [List.length_map]; exact hτ)
             exact hptys ▸ this)
         (preservation hbodyTyped heval_body henv_body hft hcinv_body
-          (FnEnvDisjoint.bindParams (hrecEnv ▸ hbaseDisj.extend hFname) _ _ hclosParams) hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty).liftFromEmptyΛ.liftFromNoneE
+          (FnEnvDisjoint.bindParams (hrecEnv ▸ hbaseDisj.extend hFname) _ _ hclosParams) hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty LoopLabelConsistent.empty).liftFromEmptyΛ.liftFromNoneE
       | .recMutualClosure (bindings := bindings_cl)
           hptys_cl hrecEnv_cl hrecΓ_cl hidx hbinding hbaseWT_cl hbaseInv_cl hbaseDisj_cl
           hFnames_cl hparams_cl hbodies_cl => by
@@ -1451,10 +1478,10 @@ def preservation
         have hbody_typed := hbodies_cl _ hidx
         have hparams_i := fun p hp => hparams_cl _ hidx p hp
         rw [hbinding] at hbody_typed hparams_i; simp at hbody_typed hparams_i
-        have apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+        have apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
         have hvts' := hptys_cl ▸ apr.hasTypes
         -- Build the three invariants
-        refine (preservation hbody_typed heval_body ?_ hft ?_ ?_ hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty).liftFromEmptyΛ.liftFromNoneE
+        refine (preservation hbody_typed heval_body ?_ hft ?_ ?_ hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty LoopLabelConsistent.empty).liftFromEmptyΛ.liftFromNoneE
         · -- EnvWellTyped (bindParams captured✝ params✝ argVals✝) (TyEnv.bindParams recΓ✝ params✝)
           rw [hrecEnv_cl]
           apply EnvWellTyped.bindParams_preserves _ _ _ hvts' hlen_clo
@@ -1490,7 +1517,7 @@ def preservation
       let cinv_func := hcinv _ _ _ hfn hΓ
       match cinv_func with
       | .rawFn hptys hclosParams hbodyTyped =>
-        let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+        let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
         let hvts' := hptys ▸ apr.hasTypes
         let hlen_bp := by
           have := hvts'.length_eq; simp [List.length_map] at this; omega
@@ -1502,7 +1529,7 @@ def preservation
             have := apr.closureOks i hv (by subst hptys; simp [List.length_map]; exact hτ)
             exact hptys ▸ this)
         (preservation hbodyTyped heval_body henv_body hft hcinv_body
-          (FnEnvDisjoint.bindParams FnEnvDisjoint.empty _ _ hclosParams) hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty).liftFromEmptyΛ.liftFromNoneE
+          (FnEnvDisjoint.bindParams FnEnvDisjoint.empty _ _ hclosParams) hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty LoopLabelConsistent.empty).liftFromEmptyΛ.liftFromNoneE
       | .not_closure _ _ hnotrfn _ => absurd rfl (hnotrfn _ _)
     | .applyClosure hΓ _ =>
       absurd (EnvWellTyped.lookup henv hΓ hfn) (fun h => ValueHasType.rawFn_not_func h)
@@ -1516,7 +1543,7 @@ def preservation
       obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Option.some.inj hft_lookup)
       -- Now params'/body' are unified with the eval's params/body
       -- hmap_eq : params.map (·.ty) = paramTys, hbody_typed : HasType ... body τ
-      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
       -- apr.hasTypes : ValueListHasType argVals paramTys
       -- We need ValueListHasType argVals (params.map (·.ty))
       have hvts_map := hmap_eq ▸ apr.hasTypes
@@ -1528,7 +1555,7 @@ def preservation
           have := apr.closureOks i hv (by subst hmap_eq; simp [List.length_map]; exact hτ)
           exact hmap_eq ▸ this)
       exact (preservation hbody_typed heval_body henv_body hft hcinv_body
-        (FnEnvDisjoint.bindParams FnEnvDisjoint.empty _ _ hftparams) hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty).liftFromEmptyΛ.liftFromNoneE
+        (FnEnvDisjoint.bindParams FnEnvDisjoint.empty _ _ hftparams) hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty LoopLabelConsistent.empty).liftFromEmptyΛ.liftFromNoneE
     | .applyClosure hΓ _ => by
       -- ft func = some (...) → F func = some (...) by FnTableComplete
       obtain ⟨retTy', hFsome⟩ := hftc _ _ _ hfnlookup
@@ -1544,10 +1571,10 @@ def preservation
       match v, hvt with
       | .rawFn ps bd, .rawFn =>
         exact absurd hFsome (by rw [hdisj.2 _ _ _ henv_v]; exact fun h => nomatch h)
-  | .applyJoin hjt heval_args hlen heval_body => match htype with
+  | .applyJoin hjt heval_args hlen henv_params_fresh heval_body => match htype with
     | .applyJoin hΔ htype_args =>
       let ⟨hmap, hfparams, hbody_typed⟩ := hjwt.extract hjt hΔ
-      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
       let hvts := hmap ▸ apr.hasTypes
       let hlen_bp := by have := hvts.length_eq; simp [List.length_map] at this; omega
       let henv_body := EnvWellTyped.bindParams_preserves henv _ _ hvts hlen_bp
@@ -1558,107 +1585,127 @@ def preservation
       -- hbody_typed is at E=none; lift to current E via strengthen_E_from_none
       preservation (hbody_typed.strengthen_E_from_none E) heval_body henv_body hft hcinv_body
         (FnEnvDisjoint.bindParams hdisj _ _ hfparams) hftc
-        hjwt.weakenΓ_bindParams hjdc
+        (hjwt.weakenΓ_bindParams (fun p hp => EnvWellTyped.env_none_Γ_none henv (henv_params_fresh p hp))) hjdc hllc
 
   -- ════════ Tuple (needs ValueListHasType from preservationArgs) ════════
   | .tuple heval_args => match htype with
     | .tuple htype_args =>
-      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
       .val' (.tuple apr.hasTypes) (.tuple apr.closureOks)
 
   -- ════════ Loop ════════
-  | .loopVal heval_args heval_body => match htype with
+  | .loopVal hlt_fresh henv_params_fresh heval_args heval_body => match htype with
     | .loop hloopParams htype_args htype_body =>
-      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
       let hlen := by
         have := apr.hasTypes.length_eq; simp [List.length_map] at this; omega
       let henv' := EnvWellTyped.bindParams_preserves henv _ _ apr.hasTypes hlen
       let hcinv' := ClosureInvariant.bindParams hcinv _ _ apr.hasTypes hlen
         (fun i hv hτ => apr.closureOks i hv (by simp [List.length_map]; exact hτ))
+      have hΛfresh : Λ _ = none := by
+        by_contra h; push_neg at h; obtain ⟨e, he⟩ := Option.ne_none_iff_exists'.mp h
+        obtain ⟨_, _, habs⟩ := hllc _ e he; rw [hlt_fresh] at habs; exact nomatch habs
+      have hΓpfresh := fun p hp => EnvWellTyped.env_none_Γ_none henv (henv_params_fresh p hp)
       (preservation htype_body heval_body henv' hft hcinv'
-        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop hjdc).liftVal
-  | .loopBreak heval_args heval_body => match htype with
+        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΓpfresh hΛfresh) hjdc (hllc.extend hlt_fresh)).liftVal
+  | .loopBreak hlt_fresh henv_params_fresh heval_args heval_body => match htype with
     | .loop hloopParams htype_args htype_body =>
-      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
       let hlen := by
         have := apr.hasTypes.length_eq; simp [List.length_map] at this; omega
       let henv' := EnvWellTyped.bindParams_preserves henv _ _ apr.hasTypes hlen
       let hcinv' := ClosureInvariant.bindParams hcinv _ _ apr.hasTypes hlen
         (fun i hv hτ => apr.closureOks i hv (by simp [List.length_map]; exact hτ))
+      have hΛfresh : Λ _ = none := by
+        by_contra h; push_neg at h; obtain ⟨e, he⟩ := Option.ne_none_iff_exists'.mp h
+        obtain ⟨_, _, habs⟩ := hllc _ e he; rw [hlt_fresh] at habs; exact nomatch habs
+      have hΓpfresh := fun p hp => EnvWellTyped.env_none_Γ_none henv (henv_params_fresh p hp)
       let pr := preservation htype_body heval_body henv' hft hcinv'
-        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop hjdc
+        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΓpfresh hΛfresh) hjdc (hllc.extend hlt_fresh)
       by
         cases pr.hasType with
         | breakSome hΛ hvt hcl =>
           simp [LoopTyEnv.extend] at hΛ
           obtain ⟨_, rfl⟩ := hΛ
           exact PresResult.val' hvt hcl
-  | .loopBreakNone heval_args heval_body => match htype with
+  | .loopBreakNone hlt_fresh henv_params_fresh heval_args heval_body => match htype with
     | .loop hloopParams htype_args htype_body =>
-      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
       let hlen := by
         have := apr.hasTypes.length_eq; simp [List.length_map] at this; omega
       let henv' := EnvWellTyped.bindParams_preserves henv _ _ apr.hasTypes hlen
       let hcinv' := ClosureInvariant.bindParams hcinv _ _ apr.hasTypes hlen
         (fun i hv hτ => apr.closureOks i hv (by simp [List.length_map]; exact hτ))
+      have hΛfresh : Λ _ = none := by
+        by_contra h; push_neg at h; obtain ⟨e, he⟩ := Option.ne_none_iff_exists'.mp h
+        obtain ⟨_, _, habs⟩ := hllc _ e he; rw [hlt_fresh] at habs; exact nomatch habs
+      have hΓpfresh := fun p hp => EnvWellTyped.env_none_Γ_none henv (henv_params_fresh p hp)
       let pr := preservation htype_body heval_body henv' hft hcinv'
-        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop hjdc
+        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΓpfresh hΛfresh) hjdc (hllc.extend hlt_fresh)
       by
         cases pr.hasType with
         | breakNone hΛ =>
           simp [LoopTyEnv.extend] at hΛ
           obtain ⟨_, rfl⟩ := hΛ
           exact PresResult.val' .unit (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
-  | .loopContinue heval_args heval_body hlen_cont heval_reentry => match htype with
+  | .loopContinue hlt_fresh henv_params_fresh heval_args heval_body hlen_cont heval_reentry => match htype with
     | .loop hloopParams htype_args htype_body =>
-      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
       let hlen := by
         have := apr.hasTypes.length_eq; simp [List.length_map] at this; omega
       let henv' := EnvWellTyped.bindParams_preserves henv _ _ apr.hasTypes hlen
       let hcinv' := ClosureInvariant.bindParams hcinv _ _ apr.hasTypes hlen
         (fun i hv hτ => apr.closureOks i hv (by simp [List.length_map]; exact hτ))
+      have hΛfresh : Λ _ = none := by
+        by_contra h; push_neg at h; obtain ⟨e, he⟩ := Option.ne_none_iff_exists'.mp h
+        obtain ⟨_, _, habs⟩ := hllc _ e he; rw [hlt_fresh] at habs; exact nomatch habs
+      have hΓpfresh := fun p hp => EnvWellTyped.env_none_Γ_none henv (henv_params_fresh p hp)
       let pr := preservation htype_body heval_body henv' hft hcinv'
-        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop hjdc
+        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΓpfresh hΛfresh) hjdc (hllc.extend hlt_fresh)
       by
         cases pr.hasType with
         | «continue» hΛ hvts_next hclos_next =>
           simp [LoopTyEnv.extend] at hΛ
           obtain ⟨rfl, rfl⟩ := hΛ
-          exact preservationLoopReentry htype_body heval_reentry henv hft hcinv hdisj hftc hjwt hjdc
-            hloopParams hvts_next hclos_next
-  | .loopReturn heval_args heval_body => match htype with
+          exact preservationLoopReentry htype_body heval_reentry henv hft hcinv hdisj hftc hjwt hjdc hllc
+            hloopParams henv_params_fresh hlt_fresh hvts_next hclos_next
+  | .loopReturn hlt_fresh henv_params_fresh heval_args heval_body => match htype with
     | .loop _ htype_args htype_body => .return'
-  | .loopError heval_args heval_body => match htype with
+  | .loopError hlt_fresh henv_params_fresh heval_args heval_body => match htype with
     | .loop hloopParams htype_args htype_body =>
-      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc
+      let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
       let hlen := by
         have := apr.hasTypes.length_eq; simp [List.length_map] at this; omega
       let henv' := EnvWellTyped.bindParams_preserves henv _ _ apr.hasTypes hlen
       let hcinv' := ClosureInvariant.bindParams hcinv _ _ apr.hasTypes hlen
         (fun i hv hτ => apr.closureOks i hv (by simp [List.length_map]; exact hτ))
+      have hΛfresh : Λ _ = none := by
+        by_contra h; push_neg at h; obtain ⟨e, he⟩ := Option.ne_none_iff_exists'.mp h
+        obtain ⟨_, _, habs⟩ := hllc _ e he; rw [hlt_fresh] at habs; exact nomatch habs
+      have hΓpfresh := fun p hp => EnvWellTyped.env_none_Γ_none henv (henv_params_fresh p hp)
       let pr := preservation htype_body heval_body henv' hft hcinv'
-        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop hjdc
+        (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΓpfresh hΛfresh) hjdc (hllc.extend hlt_fresh)
       pr.errorWeaken
 
   -- ════════ Error handling ════════
   | .handleErrorToResultOk heval_obj => match htype with
     | .handleErrorToResult htype_obj =>
-      let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc
+      let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc
       let hvt := pr.hasType.getVal
       .val' (.errorValueResultOk hvt) (.errorValueResultOk (pr.closureOk _ rfl))
   | .handleErrorToResultErr heval_obj => match htype with
     | .handleErrorToResult htype_obj =>
-      let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc
+      let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc
       let hvt := pr.errorTyped _ _ rfl rfl  -- ValueHasType v errTy (matching the handler's errTy)
       .val' (.errorValueResultErr hvt) (.errorValueResultErr (pr.errorClosureOk _ _ rfl rfl))
   | .handleErrorJoinOk heval_obj => match htype with
-    | .handleErrorJoinapply htype_obj _ => (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc).liftValE
-  | .handleErrorJoinErr heval_obj hjt_lookup heval_body => match htype with
+    | .handleErrorJoinapply htype_obj _ => (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc).liftValE
+  | .handleErrorJoinErr heval_obj hjt_lookup henv_jparams_fresh heval_body => match htype with
     | .handleErrorJoinapply htype_obj hΔ =>
       -- Get join body typing from JoinWellTyped invariant (at outer E)
       let ⟨hmap, hfparams, hbody_typed⟩ := hjwt.extract hjt_lookup hΔ
       -- Get error value typing from preservation on obj (at E = some errTy)
-      let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc
+      let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc
       let hvt_err := pr.errorTyped _ _ rfl rfl  -- ValueHasType v errTy
       -- Build ValueListHasType [v] [errTy] (single-element list)
       let hvts : ValueListHasType [_] [_] := .cons hvt_err .nil
@@ -1671,12 +1718,7 @@ def preservation
           have hi : i = 0 := by simp at hv; omega
           subst hi
           have hcl := pr.errorClosureOk _ _ rfl rfl
-          -- Goal: ValClosureOk [v][0] (map Param.ty jparams)[0] F
-          -- hcl : ValClosureOk v errTy F, hmap : map Param.ty jparams = [errTy]
           simp only [List.getElem_cons_zero]
-          -- hcl : ValClosureOk v errTy F
-          -- hmap : List.map Param.ty jparams = [errTy]
-          -- Goal: ValClosureOk v (List.map Param.ty jparams)[0] F
           have h_idx : ∀ (l : List Mtype) (h : 0 < l.length) (a : Mtype),
               l = [a] → l[0]'h = a := by
             intros l h a heq; subst heq; simp
@@ -1684,33 +1726,33 @@ def preservation
       -- Preservation on join body (hbody_typed is at E=none; lift to outer E)
       preservation (hbody_typed.strengthen_E_from_none E) heval_body henv_body hft hcinv_body
         (FnEnvDisjoint.bindParams hdisj _ _ hfparams) hftc
-        hjwt.weakenΓ_bindParams hjdc
+        (hjwt.weakenΓ_bindParams (fun p hp => EnvWellTyped.env_none_Γ_none henv (henv_jparams_fresh p hp))) hjdc hllc
   | .handleErrorReturnErrOk heval_obj => match htype with
-    | .handleErrorReturnErr htype_obj => (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc).liftValE
+    | .handleErrorReturnErr htype_obj => (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc).liftValE
   | .handleErrorReturnErrErr heval_obj => match htype with
     | .handleErrorReturnErr htype_obj =>
-      let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc
+      let pr := preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc
       pr.errorWeaken
   | .handleErrorPropagate heval_obj hnotval hnoterr => match htype with
     | .handleErrorToResult htype_obj =>
-      (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc).weakenE
+      (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc).weakenE
         (by simp [Outcome.isAbort]) hnoterr
     | .handleErrorJoinapply htype_obj _ =>
-      (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc).weakenE
+      (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc).weakenE
         (by simp [Outcome.isAbort]) hnoterr
     | .handleErrorReturnErr htype_obj =>
-      (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc).weaken
+      (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken
         (by simp [Outcome.isAbort])
 
   -- ════════ Return ════════
   | .returnSingle heval_e => match htype with
-    | .returnSingle htype_e => preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc
+    | .returnSingle htype_e => preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc hllc
   | .returnError heval_e => match htype with
     | .returnErr hE htype_e =>
-      let pr := preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc
+      let pr := preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc hllc
       .errorKnown pr.hasType.getVal (pr.closureOk _ rfl) hE
   | .returnOk heval_e => match htype with
-    | .returnOk htype_e => preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc
+    | .returnOk htype_e => preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc hllc
 
 /-- Preservation for loop re-entry.
     Handles all LoopReentry constructors, producing PresResult in the OUTER Λ. -/
@@ -1725,11 +1767,20 @@ def preservationLoopReentry
     (hftc : FnTableComplete ft F)
     (hjwt : JoinWellTyped jt Δ Γ Λ F)
     (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
     (hloopParams : ∀ p, p ∈ params → F p.binder = none)
+    (henv_params_fresh : ∀ p, p ∈ params → env p.binder = none)
+    (hlt_fresh : lt label = none)
     (hvts : ValueListHasType newVals (params.map (·.ty)))
     (hclos : ∀ i (hv : i < newVals.length) (hτ : i < (params.map (·.ty)).length),
       ValClosureOk (newVals[i]'hv) ((params.map (·.ty))[i]'hτ) F) :
     PresResult loopOutcome τ E F Λ := by
+  have hΛfresh : Λ label = none := by
+    by_contra h; push_neg at h; obtain ⟨e, he⟩ := Option.ne_none_iff_exists'.mp h
+    obtain ⟨_, _, habs⟩ := hllc _ e he; rw [hlt_fresh] at habs; exact nomatch habs
+  have hΓpfresh := fun p hp => EnvWellTyped.env_none_Γ_none henv (henv_params_fresh p hp)
+  have hllc' : LoopLabelConsistent (LoopTable.extend lt label ⟨params, body⟩)
+      (LoopTyEnv.extend Λ label ⟨params.map (·.ty), τ⟩) := hllc.extend hlt_fresh
   match hreentry with
   | .val heval_body =>
     have hlen : params.length = newVals.length := by
@@ -1738,7 +1789,7 @@ def preservationLoopReentry
     let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
       (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
     exact (preservation htype_body heval_body henv' hft hcinv'
-      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop hjdc).liftVal
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΓpfresh hΛfresh) hjdc hllc').liftVal
   | .breakSome heval_body =>
     have hlen : params.length = newVals.length := by
       have := hvts.length_eq; simp [List.length_map] at this; omega
@@ -1746,7 +1797,7 @@ def preservationLoopReentry
     let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
       (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
     let pr := preservation htype_body heval_body henv' hft hcinv'
-      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop hjdc
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΓpfresh hΛfresh) hjdc hllc'
     cases pr.hasType with
     | breakSome hΛ hvt hcl =>
       simp [LoopTyEnv.extend] at hΛ
@@ -1759,7 +1810,7 @@ def preservationLoopReentry
     let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
       (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
     let pr := preservation htype_body heval_body henv' hft hcinv'
-      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop hjdc
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΓpfresh hΛfresh) hjdc hllc'
     cases pr.hasType with
     | breakNone hΛ =>
       simp [LoopTyEnv.extend] at hΛ
@@ -1772,13 +1823,13 @@ def preservationLoopReentry
     let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
       (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
     let pr := preservation htype_body heval_body henv' hft hcinv'
-      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop hjdc
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΓpfresh hΛfresh) hjdc hllc'
     cases pr.hasType with
     | «continue» hΛ hvts_next hclos_next =>
       simp [LoopTyEnv.extend] at hΛ
       obtain ⟨rfl, rfl⟩ := hΛ
-      exact preservationLoopReentry htype_body hreentry_inner henv hft hcinv hdisj hftc hjwt hjdc
-        hloopParams hvts_next hclos_next
+      exact preservationLoopReentry htype_body hreentry_inner henv hft hcinv hdisj hftc hjwt hjdc hllc
+        hloopParams henv_params_fresh hlt_fresh hvts_next hclos_next
   | .return heval_body => exact .return'
   | .error heval_body =>
     have hlen : params.length = newVals.length := by
@@ -1787,7 +1838,7 @@ def preservationLoopReentry
     let hcinv' := ClosureInvariant.bindParams hcinv _ _ hvts hlen
       (fun i hv hτ => hclos i hv (by simp [List.length_map]; exact hτ))
     let pr := preservation htype_body heval_body henv' hft hcinv'
-      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc hjwt.weakenΓΛ_loop hjdc
+      (FnEnvDisjoint.bindParams hdisj _ _ hloopParams) hftc (hjwt.weakenΓΛ_loop hΓpfresh hΛfresh) hjdc hllc'
     exact pr.errorWeaken
 
 def preservation_val
@@ -1799,9 +1850,10 @@ def preservation_val
     (hdisj : FnEnvDisjoint env F)
     (hftc : FnTableComplete ft F)
     (hjwt : JoinWellTyped jt Δ Γ Λ F)
-    (hjdc : JoinDeltaConsistent jt Δ) :
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ) :
     ValueHasType v τ :=
-  (preservation htype heval henv hft hcinv hdisj hftc hjwt hjdc).hasType.getVal
+  (preservation htype heval henv hft hcinv hdisj hftc hjwt hjdc hllc).hasType.getVal
 
 end -- mutual
 

@@ -175,6 +175,8 @@ theorem ex6_mcore :
         [] lbl)
       (.val (.const (.int 99))) ms 0 := by
   apply Mcore.Eval.loopBreak
+  · simp [mlt, Mcore.LoopTable.empty]
+  · intro p hp; exact absurd hp (by simp)
   · exact Mcore.EvalArgs.nil
   · apply Mcore.Eval.letAbort
     · exact Mcore.Eval.breakSome Mcore.Eval.const
