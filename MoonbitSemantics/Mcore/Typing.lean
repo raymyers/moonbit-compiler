@@ -437,8 +437,12 @@ inductive ValueHasType : Value → Mtype → Prop where
     ValueListHasType vals τs →
     ValueHasType (.tuple vals) (.tuple τs)
   | locConstr :
-    {σ : Loc → Option (List Mtype)} →
-    σ l = some ats →
+    (hsize : ∀ (s : Store) (fields : Array Value) (mutFlags : Array Bool),
+      s l = some (.record fields mutFlags) → fields.size = ats.length) →
+    (htyped : ∀ (s : Store) (fields : Array Value) (mutFlags : Array Bool),
+      s l = some (.record fields mutFlags) →
+      ∀ i (hf : i < fields.size) (hτ : i < ats.length),
+        ValueHasType (fields[i]'hf) (ats[i]'hτ)) →
     ValueHasType (.loc l) (.constr tid ats)
   | locArray :
     ValueHasType (.loc l) (.fixedarray elemTy)

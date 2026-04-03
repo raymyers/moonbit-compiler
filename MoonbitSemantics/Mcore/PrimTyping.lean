@@ -83,7 +83,7 @@ theorem evalPrim_type_sound'
       | rawFn => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> first | exact .unit | exact .rawFn
       | constr hvl => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> first | exact .unit | exact .constr hvl
       | tuple hvts => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> first | exact .unit | exact .tuple hvts
-      | locConstr hσ => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> first | exact .unit | exact .locConstr hσ
+      | locConstr hsize htyped => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> first | exact .unit | exact .locConstr hsize htyped
       | locArray => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> first | exact .unit | exact .locArray
       | errorValueResultOk hvt => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> first | exact .unit | exact .errorValueResultOk hvt
       | errorValueResultErr hvt => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> first | exact .unit | exact .errorValueResultErr hvt

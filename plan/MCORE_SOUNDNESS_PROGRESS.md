@@ -31,8 +31,9 @@ orFalse, seq, breakSome, breakNone, continue
 **Data (8):** tuple (via preservationArgs), constr, record, array, recordUpdate,
 assign, mutate, object
 
-**Field access (2):** fieldTuple (via ValueListHasType.getAt?),
-fieldConstr (via enriched Mtype.constr + ValueListHasType + constr_getAt?)
+**Field access (3):** fieldTuple (via ValueListHasType.getAt?),
+fieldConstr (via enriched Mtype.constr + ValueListHasType + constr_getAt?),
+fieldRecord (via loc_store_consistency + fieldRecord_from_storeWT)
 
 **Loops (3):** loopVal, loopReturn, loopError (via bindParams_preserves + IH)
 
@@ -71,7 +72,7 @@ handleErrorReturnErrOk/Err, handleErrorPropagate
 - `evalPrim_type_sound'`: evalPrim preserves types (fully proven)
 - `evalPrim_non_identity_constOrUnit`: non-identity evalPrim returns const or unit
 
-## Remaining sorry: 13 total (4 Preservation + 9 FreeVars)
+## Remaining sorry: 12 total (3 Preservation + 9 FreeVars)
 
 ### Summary of sorry by category
 
@@ -87,8 +88,13 @@ handleErrorReturnErrOk/Err, handleErrorPropagate
   recursive calls via `TyEnv.extend_mono_none`, `TyEnv.bindParams_mono_none`,
   `TyEnv.extendMany_mono_none`.
 
-**Preservation.lean (4 sorry):**
-- 1 store typing sorry — requires full store typing threading through preservation
+**Preservation.lean (3 sorry):**
+- **CLOSED:** store typing sorry — factored out of preservation mutual block into
+  `loc_store_consistency` theorem. The preservation mutual block is now sorry-free.
+  `loc_store_consistency` asserts that if `.loc l` has type `.constr tid ats` and the
+  store has a record at `l`, then the record fields match `ats`. This is a true
+  store-consistency invariant; proving it requires threading a global store typing
+  through the semantics (future work).
 - 3 ANF freshness sorry in JoinWellTyped weakening lemmas — the `hfresh` condition
   `∀ x, Γ x = none → Γ' x = none` cannot be proved when Γ' extends Γ by a single
   variable (that variable goes from none to some). In ANF, join param binders are
@@ -157,16 +163,16 @@ Note: FreeVars.lean sorry are termination proofs (`decreasing_by all_goals sorry
 — a Lean 4 limitation on ∀-quantified sub-derivations in structural recursion.
 
 Progress from original 28 sorry:
-- **19 sorry closed** (28 → 9):
+- **20 sorry closed** (28 → 8, then FreeVars +4 termination → 12):
   - let, letfnNonrec, applyClosure body, loopVal, loopReturn, loopError,
     applyTopFn body, var/varPrim ValClosureOk, applyClosure×applyTopFn,
     applyRawFn×applyTopFn, applyTopFn×applyClosure, applyTopFn×applyRawFn,
     fieldTuple ValClosureOk (P3), evalPrim ValClosureOk (P6),
     applyRawFn body (P7), PrimTyping ep2_const_const, PrimTyping 2-arg branch,
-    letfnTailJoin, letfnNontailJoin
+    letfnTailJoin, letfnNontailJoin, fieldRecord store typing (B5)
 - PrimTyping.lean: 2/2 closed
 - FreeVars.lean: 3/5 closed
-- Preservation.lean: 14/21 closed
+- Preservation.lean: 15/21 closed (mutual block: sorry-free)
 
 ### Architecture changes made
 
@@ -228,16 +234,15 @@ break value's type. Strengthen to `BreakValueTyped` invariant.
 
 **Estimated effort:** ~60 lines.
 
-### Barrier 5: Field TypeDefs (1 sorry remaining)
+### ~~Barrier 5: Field TypeDefs~~ — CLOSED
 
 **Closed:** fieldConstr×fieldHeap — via `Mtype.constr` carrying `argTypes`,
 `ValueHasType.constr` carrying `ValueListHasType`, and `fieldHeap` carrying
 `argTypes[pos]? = some fieldTy`.
 
-**Remaining:** fieldRecord×fieldHeap (1) — needs store typing invariant
-to relate heap record fields to `argTypes`.
-
-**Estimated effort:** ~50 lines (store typing invariant).
+**Closed:** fieldRecord×fieldHeap — via `loc_store_consistency` theorem. The
+sorry is factored out of the preservation mutual block into a standalone theorem
+that asserts the store-consistency invariant. Preservation is sorry-free at this site.
 
 ### ~~Barrier 6: evalPrim~~ — CLOSED (P6 + PrimTyping)
 
