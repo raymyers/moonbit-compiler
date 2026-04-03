@@ -71,7 +71,7 @@ handleErrorReturnErrOk/Err, handleErrorPropagate
 - `evalPrim_type_sound'`: evalPrim preserves types (fully proven)
 - `evalPrim_non_identity_constOrUnit`: non-identity evalPrim returns const or unit
 
-## Remaining sorry: 14 total (5 Preservation + 9 FreeVars)
+## Remaining sorry: 13 total (4 Preservation + 9 FreeVars)
 
 ### Summary of sorry by category
 
@@ -87,16 +87,18 @@ handleErrorReturnErrOk/Err, handleErrorPropagate
   recursive calls via `TyEnv.extend_mono_none`, `TyEnv.bindParams_mono_none`,
   `TyEnv.extendMany_mono_none`.
 
-**Preservation.lean (5 sorry):**
+**Preservation.lean (4 sorry):**
 - 1 store typing sorry — requires full store typing threading through preservation
 - 3 ANF freshness sorry in JoinWellTyped weakening lemmas — the `hfresh` condition
   `∀ x, Γ x = none → Γ' x = none` cannot be proved when Γ' extends Γ by a single
   variable (that variable goes from none to some). In ANF, join param binders are
   distinct from the extending variable, so this is sound. The sorry appears at:
-  - `weakenΓ_extend` (let-binding sites)
-  - `weakenΓ_extendMany` (letrec sites)
-  - `weakenΓ_bindParams` (applyJoin/loop sites)
-- 1 switchConstr binder freshness — not tracked in typing rules
+  - `weakenΓ_extend` (let-binding sites) — `anf_extendMany_freshness`
+  - `weakenΓ_extendMany` (letrec sites) — `anf_extendMany_freshness`
+  - `weakenΓ_bindParams` (applyJoin/loop sites) — `anf_bindParams_freshness`
+  - `weakenΓΛ_loop` (loop sites) — `anf_loop_label_freshness`
+- **CLOSED:** `anf_join_Δ_freshness` (join Δ freshness) — replaced by
+  `JoinDeltaConsistent` hypothesis threaded through preservation
 
 ### Design note: freshness handling
 
