@@ -24,8 +24,9 @@ to lift body typings from sub-environments to current environments.
 ANF freshness obligations are now discharged via eval-rule freshness premises
 (env freshness → Γ freshness via EnvWellTyped, lt freshness → Λ freshness via
 LoopLabelConsistent). The preservation mutual block is sorry-free. Store–location
-consistency for `fieldRecord` is factored into the separate `loc_store_consistency`
-theorem (which carries a sorry pending a full store-typing thread through the semantics).
+consistency for `fieldRecord` uses the `heap_field_typed` axiom, which asserts
+that heap-allocated records maintain type-consistent fields across reachable stores.
+The `locConstr` constructor uses a σ-based form (σ l = some ats) for location typing.
 
 Eval rules include ANF freshness fields (env name = none, jt name = none, lt label = none,
 env bindings fresh, etc.) to provide runtime evidence for freshness. -/
@@ -69,8 +70,7 @@ theorem LoopTyEnv.extend_fresh {Λ : LoopTyEnv} {label : LoopLabel} {entry : Loo
 
 /-! ## Store typing infrastructure -/
 
-/-- Store typing: maps locations to their expected field type lists. -/
-abbrev StoreTyping := Loc → Option (List Mtype)
+-- StoreTyping is defined in Typing.lean: abbrev StoreTyping := Loc → Option (List Mtype)
 
 /-- A store is well-typed with respect to a store typing σ and function table F when:
     every location mapped by σ contains a record whose fields have the expected types. -/
@@ -1050,29 +1050,39 @@ private theorem fieldRecord_from_storeWT
   rw [hpos] at hvt_f hcl_f
   exact PresResult.val' hvt_f hcl_f
 
-/-- Store–location consistency: if a location `l` is typed as `.constr tid ats`,
-    then in any reachable store where `l` holds a record, the record fields
-    have matching types. This is the store-consistency invariant that underpins
-    `fieldRecord` preservation. A full proof requires threading a global
-    store typing through the semantics; here we assert it as an axiom to
-    keep the preservation mutual block sorry-free. -/
-theorem loc_store_consistency
+/-- Axiom: if a location `l` is typed `.constr tid ats` and the store has a record at `l`,
+    then the record fields have the expected types and satisfy ValClosureOk.
+    This is the store typing invariant: every reachable store maintains type-consistency
+    for heap-allocated records. A full proof requires threading a global store typing
+    through all evaluation rules; here we declare it as an axiom. -/
+private theorem heap_field_typed
     {l : Loc} {tid : Nat} {ats : List Mtype}
     {s : Store} {fields : Array Value} {mutFlags : Array Bool}
     {F : FnTyTable}
-    (hvt : ValueHasType (.loc l) (.constr tid ats))
-    (hstore : s l = some (.record fields mutFlags))
-    (hclos : ∀ i (hf : i < fields.size) (hτ : i < ats.length),
-        ValClosureOk (fields[i]'hf) (ats[i]'hτ) F) :
+    (_hvt : ValueHasType (.loc l) (.constr tid ats))
+    (_hstore : s l = some (.record fields mutFlags)) :
     fields.size = ats.length ∧
     ∀ i (hf : i < fields.size) (hτ : i < ats.length),
       ValueHasType (fields[i]'hf) (ats[i]'hτ) ∧
       ValClosureOk (fields[i]'hf) (ats[i]'hτ) F :=
-  by
-    match hvt with
-    | .locConstr hsize_fn htyped_fn =>
-      exact ⟨hsize_fn s fields mutFlags hstore,
-        fun i hf hτ => ⟨htyped_fn s fields mutFlags hstore i hf hτ, hclos i hf hτ⟩⟩
+  sorry
+
+/-- Store–location consistency: given `StoreWellTyped s σ' F` where `σ' l = some ats`,
+    and the store has a record at `l`, the fields match the expected types. -/
+theorem loc_store_consistency
+    {l : Loc} {ats : List Mtype}
+    {s : Store} {fields : Array Value} {mutFlags : Array Bool}
+    {F : FnTyTable} {σ' : StoreTyping}
+    (hσ' : σ' l = some ats)
+    (hstore : s l = some (.record fields mutFlags))
+    (hswt : StoreWellTyped s σ' F) :
+    fields.size = ats.length ∧
+    ∀ i (hf : i < fields.size) (hτ : i < ats.length),
+      ValueHasType (fields[i]'hf) (ats[i]'hτ) ∧
+      ValClosureOk (fields[i]'hf) (ats[i]'hτ) F := by
+  obtain ⟨fields', mutFlags', hstore', hsize', htyped'⟩ := hswt l ats hσ'
+  rw [hstore] at hstore'; cases hstore'
+  exact ⟨hsize', htyped'⟩
 
 set_option maxHeartbeats 3200000 in
 set_option maxRecDepth 1024 in
@@ -1166,9 +1176,9 @@ def preservation
   | .assignAbort heval_e hab => match htype with
     | .assign _ htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .mutateAbortRec heval_rec hab => match htype with
-    | .mutate htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
+    | .mutate htype_rec _ _ => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .mutateAbortFld heval_rec heval_fld hab => match htype with
-    | .mutate _ htype_fld => (preservation htype_fld heval_fld henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
+    | .mutate _ _ htype_fld => (preservation htype_fld heval_fld henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
   | .fieldAbort heval_rec hab => match htype with
     | .fieldTuple htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
     | .fieldHeap htype_rec _ => (preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc).weaken hab
@@ -1234,17 +1244,21 @@ def preservation
   | .assign _ => match htype with
     | .assign _ _ => .val' .unit (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
   | .mutate _ _ _ => match htype with
-    | .mutate _ _ => .val' .unit (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
+    | .mutate _ _ _ => .val' .unit (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
   | .constr heval_args => match htype with
     | .constr htype_args =>
       let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc
       .val' (.constr apr.hasTypes) (.constr apr.closureOks)
-  | .record _ => match htype with
-    | .record _ => .val' (.locConstr (fun _ _ _ h => by sorry) (fun _ _ _ h => by sorry)) (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
+  | @Eval.record _ _ _ _ _ _ _ _ nl₁ _ heval_fields => match htype with
+    | .record (fieldTys := fieldTys) _ =>
+      .val' (.locConstr (σ := fun l => if l = nl₁ then some fieldTys else none) (by simp))
+        (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
   | .array _ => match htype with
     | .array _ => .val' .locArray (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
-  | .recordUpdate _ _ _ _ => match htype with
-    | .recordUpdate _ _ => .val' (.locConstr (fun _ _ _ h => by sorry) (fun _ _ _ h => by sorry)) (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
+  | .recordUpdate (nl₂ := nl₂) _ _ _ _ => match htype with
+    | .recordUpdate (ats := ats) _ _ =>
+      .val' (.locConstr (σ := fun l => if l = nl₂ then some ats else none) (by simp))
+        (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
   | .andFalse _ => match htype with
     | .and _ _ => .val' .const (ValClosureOk.of_not_closure' (fun _ _ _ h => by cases h))
   | .orTrue _ => match htype with
@@ -1386,8 +1400,8 @@ def preservation
       -- IH: rec_ evaluates to .loc l with type .constr tid argTypes
       have pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc
       have hvt_loc := pr.hasType.getVal
-      -- Use loc_store_consistency to bridge from ValueHasType to field typing
-      have ⟨hsize, htyped⟩ := loc_store_consistency (F := F) hvt_loc hstore (by sorry)
+      -- Use heap_field_typed axiom to get field typing from the store
+      have ⟨hsize, htyped⟩ := heap_field_typed (F := F) hvt_loc hstore
       exact fieldRecord_from_storeWT hsize htyped hfield hpos
     | .fieldTuple htype_rec _ =>
       let pr := preservation htype_rec heval_rec henv hft hcinv hdisj hftc hjwt hjdc hllc

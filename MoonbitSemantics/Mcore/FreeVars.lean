@@ -143,7 +143,7 @@ def HasType.strengthen
   | .array hargs => .array (hargs.strengthen hsub)
   | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen hsub) hp
   | .fieldHeap hrec hpos => .fieldHeap (hrec.strengthen hsub) hpos
-  | .mutate hrec hfld => .mutate (hrec.strengthen hsub) (hfld.strengthen hsub)
+  | .mutate hrec hpos hfld => .mutate (hrec.strengthen hsub) hpos (hfld.strengthen hsub)
   | .assign hΓ he => .assign (hsub _ _ hΓ) (he.strengthen hsub)
   | .seq hargs hlast => .seq (hargs.strengthen hsub) (hlast.strengthen hsub)
   | .ifSome hc ht hf => .ifSome (hc.strengthen hsub) (ht.strengthen hsub) (hf.strengthen hsub)
@@ -259,7 +259,7 @@ def HasType.strengthen_Δ
   | .array hargs => .array (hargs.strengthen_Δ hsub)
   | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen_Δ hsub) hp
   | .fieldHeap hrec hpos => .fieldHeap (hrec.strengthen_Δ hsub) hpos
-  | .mutate hrec hfld => .mutate (hrec.strengthen_Δ hsub) (hfld.strengthen_Δ hsub)
+  | .mutate hrec hpos hfld => .mutate (hrec.strengthen_Δ hsub) hpos (hfld.strengthen_Δ hsub)
   | .assign hΓ he => .assign hΓ (he.strengthen_Δ hsub)
   | .seq hargs hlast => .seq (hargs.strengthen_Δ hsub) (hlast.strengthen_Δ hsub)
   | .ifSome hc ht hf => .ifSome (hc.strengthen_Δ hsub) (ht.strengthen_Δ hsub) (hf.strengthen_Δ hsub)
@@ -366,7 +366,7 @@ def HasType.strengthen_Λ
   | .array hargs => .array (hargs.strengthen_Λ hsub)
   | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen_Λ hsub) hp
   | .fieldHeap hrec hpos => .fieldHeap (hrec.strengthen_Λ hsub) hpos
-  | .mutate hrec hfld => .mutate (hrec.strengthen_Λ hsub) (hfld.strengthen_Λ hsub)
+  | .mutate hrec hpos hfld => .mutate (hrec.strengthen_Λ hsub) hpos (hfld.strengthen_Λ hsub)
   | .assign hΓ he => .assign hΓ (he.strengthen_Λ hsub)
   | .seq hargs hlast => .seq (hargs.strengthen_Λ hsub) (hlast.strengthen_Λ hsub)
   | .ifSome hc ht hf => .ifSome (hc.strengthen_Λ hsub) (ht.strengthen_Λ hsub) (hf.strengthen_Λ hsub)
@@ -450,7 +450,7 @@ def HasType.strengthen_E_from_none_aux
   | .array hargs => .array (hargs.strengthen_E_from_none_aux hE E')
   | .fieldTuple hrec hp => .fieldTuple (hrec.strengthen_E_from_none_aux hE E') hp
   | .fieldHeap hrec hp => .fieldHeap (hrec.strengthen_E_from_none_aux hE E') hp
-  | .mutate hrec hfld => .mutate (hrec.strengthen_E_from_none_aux hE E') (hfld.strengthen_E_from_none_aux hE E')
+  | .mutate hrec hpos hfld => .mutate (hrec.strengthen_E_from_none_aux hE E') hpos (hfld.strengthen_E_from_none_aux hE E')
   | .assign hΓ he => .assign hΓ (he.strengthen_E_from_none_aux hE E')
   | .seq hargs hlast => .seq (hargs.strengthen_E_from_none_aux hE E') (hlast.strengthen_E_from_none_aux hE E')
   | .ifSome hc ht hf => .ifSome (hc.strengthen_E_from_none_aux hE E') (ht.strengthen_E_from_none_aux hE E') (hf.strengthen_E_from_none_aux hE E')

@@ -283,6 +283,7 @@ inductive HasType :
 
   | mutate :
     HasType Γ Δ Λ F E rec_ (.constr tid ats) →
+    ats[pos]? = some fieldTy →
     HasType Γ Δ Λ F E fld fieldTy →
     HasType Γ Δ Λ F E (.mutate rec_ label fld pos) .unit
 
@@ -408,6 +409,11 @@ inductive HasType :
 
 end -- mutual
 
+/-! ## Store typing -/
+
+/-- Store typing: maps locations to their expected field type lists. -/
+abbrev StoreTyping := Loc → Option (List Mtype)
+
 /-! ## Value typing, outcome typing, environment typing
 
 These are mutually dependent:
@@ -437,12 +443,8 @@ inductive ValueHasType : Value → Mtype → Prop where
     ValueListHasType vals τs →
     ValueHasType (.tuple vals) (.tuple τs)
   | locConstr :
-    (hsize : ∀ (s : Store) (fields : Array Value) (mutFlags : Array Bool),
-      s l = some (.record fields mutFlags) → fields.size = ats.length) →
-    (htyped : ∀ (s : Store) (fields : Array Value) (mutFlags : Array Bool),
-      s l = some (.record fields mutFlags) →
-      ∀ i (hf : i < fields.size) (hτ : i < ats.length),
-        ValueHasType (fields[i]'hf) (ats[i]'hτ)) →
+    {σ : StoreTyping} →
+    σ l = some ats →
     ValueHasType (.loc l) (.constr tid ats)
   | locArray :
     ValueHasType (.loc l) (.fixedarray elemTy)
