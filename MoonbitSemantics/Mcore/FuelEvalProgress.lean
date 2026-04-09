@@ -1805,4 +1805,27 @@ theorem type_soundness
       LoopLabelConsistent.empty
       hhft).hasType
 
+/-! ## Sanity check — applying the combined theorem to a trivial program -/
+
+open Moonbit.Clam in
+/-- Progress for the constant expression `.const (.int 42)`: it never
+    gets stuck, for any fuel and any function table. Demonstrates that
+    `top_level_progress` can be applied directly to concrete programs. -/
+example (F : FnTyTable) (ft : FnTable)
+    (hft : FnTableWellTyped ft F)
+    (hftc : FnTableComplete ft F)
+    (hhft : HeapFieldTyped F) (n : Nat) :
+    NotStuck (evalFuel n ft Env.empty Store.empty JoinTable.empty
+              LoopTable.empty 0 (.const (.int 42))) :=
+  top_level_progress hft hftc hhft .const .const n
+
+/-- `.unit` progress sanity check. -/
+example (F : FnTyTable) (ft : FnTable)
+    (hft : FnTableWellTyped ft F)
+    (hftc : FnTableComplete ft F)
+    (hhft : HeapFieldTyped F) (n : Nat) :
+    NotStuck (evalFuel n ft Env.empty Store.empty JoinTable.empty
+              LoopTable.empty 0 .unit) :=
+  top_level_progress hft hftc hhft .unit .unit n
+
 end Moonbit.Mcore
