@@ -1142,6 +1142,116 @@ theorem progress_apply_topFn
     | stuck msg => rw [hb] at this; exact absurd this id
     | ok o₂ s₂ nl₂ => simp [NotStuck, hb]
 
+/-- Progress for `.recordUpdate rec_ updFields _` given that `rec_`
+    evaluates to a heap-allocated loc (not an inline `.constr` value).
+    The `hrec_is_loc` hypothesis is a runtime constraint paralleling
+    `hnot_loc` in the earlier switch lemmas — it's needed because
+    `Eval.recordUpdate` only has a rule for `.loc` values while the
+    typing `.constr tid ats` admits both. -/
+theorem progress_recordUpdate
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype} {tid : Nat} {ats : List Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {rec_ : Expr}
+    {updFields : List (FieldLabel × Nat × Bool × Expr)} {fieldsNum : Nat}
+    (htype_rec : HasType Γ Δ Λ F E rec_ (.constr tid ats))
+    (hrec_is_loc : ∀ v s' nl',
+      evalFuel n ft env s jt lt nl rec_ = .ok (.val v) s' nl' →
+      ∃ l, v = .loc l)
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
+    (hhft : HeapFieldTyped F)
+    (hhlp : ∀ s' nl' o, evalFuel n ft env s jt lt nl rec_ = .ok o s' nl' →
+            HeapLocPresent s')
+    (ih_rec : NotStuck (evalFuel n ft env s jt lt nl rec_))
+    (ih_fields : ∀ s' nl',
+      NotStuckArgs (evalFuelArgs n ft env s' jt lt nl'
+        (updFields.map fun x => x.2.2.2))) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl
+      (.recordUpdate rec_ updFields fieldsNum)) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl rec_ with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih_rec; exact absurd ih_rec id
+  | ok o s' nl' =>
+    cases o with
+    | val v =>
+      have heval := evalFuel_sound hr
+      have hvt := preservation_val htype_rec heval
+        henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+      obtain ⟨l, rfl⟩ := hrec_is_loc v s' nl' hr
+      -- Use HeapLocPresent to find the record in the store
+      have hhlp' : HeapLocPresent s' := hhlp s' nl' _ hr
+      obtain ⟨fields, mutFlags, hstore, _⟩ := hhlp' l tid ats hvt
+      simp only [hstore]
+      have := ih_fields s' nl'
+      cases hfa : evalFuelArgs n ft env s' jt lt nl'
+                  (updFields.map fun x => x.2.2.2) with
+      | outOfFuelArgs => simp [NotStuck, hfa]
+      | stuckArgs msg => rw [hfa] at this; exact absurd this id
+      | abortArgs oA sA nlA => simp [NotStuck, hfa]
+      | okVals newVals s₂ nl₂ => simp [NotStuck, hfa]
+    | _ => simp [NotStuck]
+
+/-- Progress for `.mutate rec_ _ fld pos` given that `rec_` evaluates
+    to a heap-allocated loc. Parallel to `progress_recordUpdate`. -/
+theorem progress_mutate
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype} {tid : Nat} {ats : List Mtype} {fieldTy : Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {rec_ fld : Expr}
+    {label : FieldLabel} {pos : Nat}
+    (htype_rec : HasType Γ Δ Λ F E rec_ (.constr tid ats))
+    (hpos : ats[pos]? = some fieldTy)
+    (htype_fld : HasType Γ Δ Λ F E fld fieldTy)
+    (hrec_is_loc : ∀ v s' nl',
+      evalFuel n ft env s jt lt nl rec_ = .ok (.val v) s' nl' →
+      ∃ l, v = .loc l)
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
+    (hhft : HeapFieldTyped F)
+    (hhlp_fld_after_rec : ∀ s' nl' l,
+      evalFuel n ft env s jt lt nl rec_ = .ok (.val (.loc l)) s' nl' →
+      ∀ s'' nl'' v,
+        evalFuel n ft env s' jt lt nl' fld = .ok (.val v) s'' nl'' →
+        ∃ fields mutFlags, s'' l = some (.record fields mutFlags))
+    (ih_rec : NotStuck (evalFuel n ft env s jt lt nl rec_))
+    (ih_fld : ∀ s' nl', NotStuck (evalFuel n ft env s' jt lt nl' fld)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl
+      (.mutate rec_ label fld pos)) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl rec_ with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih_rec; exact absurd ih_rec id
+  | ok o s' nl' =>
+    cases o with
+    | val v =>
+      obtain ⟨l, rfl⟩ := hrec_is_loc v s' nl' hr
+      have := ih_fld s' nl'
+      cases hf : evalFuel n ft env s' jt lt nl' fld with
+      | outOfFuel => simp [NotStuck, hf]
+      | stuck msg => rw [hf] at this; exact absurd this id
+      | ok oFld sFld nlFld =>
+        cases oFld with
+        | val vFld =>
+          obtain ⟨fields, mutFlags, hstore⟩ :=
+            hhlp_fld_after_rec s' nl' l hr sFld nlFld vFld hf
+          simp [NotStuck, hf, hstore]
+        | _ => simp [NotStuck, hf]
+    | _ => simp [NotStuck]
+
 /-- Progress for `.field rec_ acc pos` on a full `.constr tid ats` type,
     handling both the `.constr tag args` and `.loc l` subcases via
     `canonical_constr` + `HeapLocPresent`. -/
