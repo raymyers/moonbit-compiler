@@ -328,15 +328,17 @@ inductive HasType :
 
   -- ═══════════ Pattern matching ═══════════
 
-  /-- Switch on constructors: all branches (and default) must have type τ. -/
+  /-- Switch on constructors: all branches (and default) must have type τ.
+      Requires a default branch for exhaustiveness — without one, the
+      expression is runtime-stuck if no case matches the constr tag. -/
   | switchConstr :
     HasType Γ Δ Λ F E obj (.constr tid ats) →
     (∀ tag binder branch, findConstrCase cases tag = some (binder, branch) →
       HasType (match binder with
         | some x => TyEnv.extend Γ x (.constr tid ats)
         | none => Γ) Δ Λ F E branch τ) →
-    (∀ d, dflt = some d → HasType Γ Δ Λ F E d τ) →
-    HasType Γ Δ Λ F E (.switchConstr obj cases dflt) τ
+    HasType Γ Δ Λ F E d τ →  -- default must be present and well-typed
+    HasType Γ Δ Λ F E (.switchConstr obj cases (some d)) τ
 
   | switchConstant :
     HasType Γ Δ Λ F E obj objTy →

@@ -1438,7 +1438,7 @@ def preservation
       preservation htype_branch heval_branch henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
   | .switchConstrDefault heval_obj hfind_none heval_dflt => match htype with
     | .switchConstr _ _ htype_dflt =>
-      preservation (htype_dflt _ rfl) heval_dflt henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+      preservation htype_dflt heval_dflt henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
   | .switchConstantMatch heval_obj hfindcase heval_branch => match htype with
     | .switchConstant _ _ htype_cases _ =>
       let ⟨i, hi, hbranch_eq⟩ := findConstantCase_index _ _ _ hfindcase
