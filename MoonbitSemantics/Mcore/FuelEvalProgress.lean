@@ -582,7 +582,7 @@ to rule out the impossible `.stuck` arms. -/
 
 theorem progress_if
     {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
-    {E : Option Mtype} {τ : Mtype}
+    {E : Option Mtype}
     {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
     {lt : LoopTable} {nl : Loc}
     {condE ifso : Expr} {ifnot : Option Expr}
@@ -1460,9 +1460,8 @@ hypotheses through recursive calls. -/
 
 mutual
 
-/-- Scope for combined progress: leaves + pure propagators that only
-    reshape sub-expression outcomes without inspecting their type, plus
-    `.var` (which uses the typing context for env lookup). -/
+/-- Scope for combined progress: leaves + pure propagators + .var +
+    typing-directed cases (.if, .and, .or). -/
 inductive CoreExpr : Expr → Prop where
   | const : CoreExpr (.const c)
   | unit : CoreExpr .unit
@@ -1484,6 +1483,11 @@ inductive CoreExpr : Expr → Prop where
       CoreExpr (.handleError obj .toResult)
   | handleErrorReturnErr : CoreExpr obj →
       CoreExpr (.handleError obj (.returnErr okTy))
+  | «if» : CoreExpr condE → CoreExpr ifso →
+      (∀ e, ifnot = some e → CoreExpr e) →
+      CoreExpr (.if condE ifso ifnot)
+  | and_ : CoreExpr lhs → CoreExpr rhs → CoreExpr (.and lhs rhs)
+  | or_ : CoreExpr lhs → CoreExpr rhs → CoreExpr (.or lhs rhs)
 
 inductive CoreArgs : List Expr → Prop where
   | nil : CoreArgs []
@@ -1492,8 +1496,8 @@ inductive CoreArgs : List Expr → Prop where
 end
 
 /-- Combined progress proposition at fuel level n for the CoreExpr scope.
-    Now takes `EnvWellTyped` + `HasType` so the `.var` case can use
-    `progress_var` via typing inversion. -/
+    Threads the full `ProgressCtx` bundle so typing-directed cases can
+    use preservation. -/
 private def CoreProgressAt (n : Nat) : Prop :=
   (∀ {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
      {E : Option Mtype} {τ : Mtype}
@@ -1501,7 +1505,7 @@ private def CoreProgressAt (n : Nat) : Prop :=
      {lt : LoopTable} {nl : Loc} {e : Expr},
     HasType Γ Δ Λ F E e τ →
     CoreExpr e →
-    EnvWellTyped env Γ →
+    ProgressCtx Γ Δ Λ F ft env jt lt →
     NotStuck (evalFuel n ft env s jt lt nl e)) ∧
   (∀ {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
      {E : Option Mtype} {τs : List Mtype}
@@ -1509,7 +1513,7 @@ private def CoreProgressAt (n : Nat) : Prop :=
      {lt : LoopTable} {nl : Loc} {es : List Expr},
     HasTypeArgs Γ Δ Λ F E es τs →
     CoreArgs es →
-    EnvWellTyped env Γ →
+    ProgressCtx Γ Δ Λ F ft env jt lt →
     NotStuckArgs (evalFuelArgs n ft env s jt lt nl es))
 
 private theorem coreProgress_zero : CoreProgressAt 0 := by
@@ -1519,65 +1523,92 @@ private theorem coreProgress_succ (n : Nat) (ih : CoreProgressAt n) :
     CoreProgressAt (n + 1) := by
   obtain ⟨ihE, ihArgs⟩ := ih
   refine ⟨?_, ?_⟩
-  · intro Γ Δ Λ F E τ ft env s jt lt nl e htype hcore henv
+  · intro Γ Δ Λ F E τ ft env s jt lt nl e htype hcore ctx
     cases hcore with
     | const => exact progress_const _ _ _ _ _ _ _ _
     | unit => exact progress_unit _ _ _ _ _ _ _
     | var =>
       cases htype with
-      | var hΓ => exact progress_var hΓ henv _ _ _ _ _ _ _
-      | varPrim hΓ => exact progress_var hΓ henv _ _ _ _ _ _ _
+      | var hΓ => exact progress_var hΓ ctx.envWT _ _ _ _ _ _ _
+      | varPrim hΓ => exact progress_var hΓ ctx.envWT _ _ _ _ _ _ _
     | function => exact progress_function _ _ _ _ _ _ _ _ _ _
     | constr h =>
       cases htype with
-      | constr ht => exact progress_constr (ihArgs ht h henv)
+      | constr ht => exact progress_constr (ihArgs ht h ctx)
     | tuple h =>
       cases htype with
-      | tuple ht => exact progress_tuple (ihArgs ht h henv)
+      | tuple ht => exact progress_tuple (ihArgs ht h ctx)
     | array h =>
       cases htype with
-      | array ht => exact progress_array (ihArgs ht h henv)
+      | array ht => exact progress_array (ihArgs ht h ctx)
     | seq hargs hlast =>
       cases htype with
       | seq htargs htlast =>
-        exact progress_seq (ihArgs htargs hargs henv)
-          (fun _ _ => ihE htlast hlast henv)
+        exact progress_seq (ihArgs htargs hargs ctx)
+          (fun _ _ => ihE htlast hlast ctx)
     | assign h =>
       cases htype with
-      | assign _ ht => exact progress_assign (ihE ht h henv)
+      | assign _ ht => exact progress_assign (ihE ht h ctx)
     | object h =>
       cases htype with
-      | object ht => exact progress_object (ihE ht h henv)
+      | object ht => exact progress_object (ihE ht h ctx)
     | breakNone => exact progress_breakNone _ _ _ _ _ _ _ _
     | breakSome h =>
       cases htype with
-      | «break» _ ht => exact progress_break_some (ihE ht h henv)
+      | «break» _ ht => exact progress_break_some (ihE ht h ctx)
     | «continue» h =>
       cases htype with
-      | «continue» _ ht => exact progress_continue (ihArgs ht h henv)
+      | «continue» _ ht => exact progress_continue (ihArgs ht h ctx)
     | returnSingle h =>
       cases htype with
-      | returnSingle ht => exact progress_return_single (ihE ht h henv)
+      | returnSingle ht => exact progress_return_single (ihE ht h ctx)
     | returnErrorResult h =>
       cases htype with
-      | returnOk ht => exact progress_return_errorResult (ihE ht h henv)
-      | returnErr _ ht => exact progress_return_errorResult (ihE ht h henv)
+      | returnOk ht => exact progress_return_errorResult (ihE ht h ctx)
+      | returnErr _ ht => exact progress_return_errorResult (ihE ht h ctx)
     | handleErrorToResult h =>
       cases htype with
       | handleErrorToResult ht =>
-        exact progress_handleError_toResult (ihE ht h henv)
+        exact progress_handleError_toResult (ihE ht h ctx)
     | handleErrorReturnErr h =>
       cases htype with
       | handleErrorReturnErr ht =>
-        exact progress_handleError_returnErr (ihE ht h henv)
-  · intro Γ Δ Λ F E τs ft env s jt lt nl es htype hargs henv
+        exact progress_handleError_returnErr (ihE ht h ctx)
+    | «if» hcondE hifso hifnot =>
+      cases htype with
+      | ifSome htcond htifso htifnot =>
+        exact progress_if htcond ctx.envWT ctx.ftWT ctx.clInv ctx.fnDisj
+          ctx.ftC ctx.jwt ctx.jdc ctx.llc ctx.hft
+          (ihE htcond hcondE ctx)
+          (fun _ _ => ihE htifso hifso ctx)
+          (fun e' he' _ _ => by
+            cases he'; exact ihE htifnot (hifnot _ rfl) ctx)
+      | ifNone htcond htifso =>
+        exact progress_if htcond ctx.envWT ctx.ftWT ctx.clInv ctx.fnDisj
+          ctx.ftC ctx.jwt ctx.jdc ctx.llc ctx.hft
+          (ihE htcond hcondE ctx)
+          (fun _ _ => ihE htifso hifso ctx)
+          (fun _ h => by cases h)
+    | and_ hl hr =>
+      cases htype with
+      | and htl htr =>
+        exact progress_and htl ctx.envWT ctx.ftWT ctx.clInv ctx.fnDisj
+          ctx.ftC ctx.jwt ctx.jdc ctx.llc ctx.hft
+          (ihE htl hl ctx) (fun _ _ => ihE htr hr ctx)
+    | or_ hl hr =>
+      cases htype with
+      | or htl htr =>
+        exact progress_or htl ctx.envWT ctx.ftWT ctx.clInv ctx.fnDisj
+          ctx.ftC ctx.jwt ctx.jdc ctx.llc ctx.hft
+          (ihE htl hl ctx) (fun _ _ => ihE htr hr ctx)
+  · intro Γ Δ Λ F E τs ft env s jt lt nl es htype hargs ctx
     cases hargs with
     | nil => exact progress_args_nil _ _ _ _ _ _ _
     | cons he hes =>
       cases htype with
       | cons hte htes =>
-        exact progress_args_cons (ihE hte he henv)
-          (fun _ _ => ihArgs htes hes henv)
+        exact progress_args_cons (ihE hte he ctx)
+          (fun _ _ => ihArgs htes hes ctx)
 
 /-- Combined core progress theorem: for every fuel level, any well-typed
     `CoreExpr` expression does not get stuck in `evalFuel`. -/
@@ -1595,9 +1626,9 @@ theorem coreProgress_eval
     {lt : LoopTable} {nl : Loc} {e : Expr}
     (htype : HasType Γ Δ Λ F E e τ)
     (hcore : CoreExpr e)
-    (henv : EnvWellTyped env Γ) :
+    (ctx : ProgressCtx Γ Δ Λ F ft env jt lt) :
     NotStuck (evalFuel n ft env s jt lt nl e) :=
-  (coreProgress n).1 htype hcore henv
+  (coreProgress n).1 htype hcore ctx
 
 /-- Main combined progress corollary (argument-list form). -/
 theorem coreProgress_evalArgs
@@ -1607,8 +1638,8 @@ theorem coreProgress_evalArgs
     {lt : LoopTable} {nl : Loc} {es : List Expr}
     (htype : HasTypeArgs Γ Δ Λ F E es τs)
     (hargs : CoreArgs es)
-    (henv : EnvWellTyped env Γ) :
+    (ctx : ProgressCtx Γ Δ Λ F ft env jt lt) :
     NotStuckArgs (evalFuelArgs n ft env s jt lt nl es) :=
-  (coreProgress n).2 htype hargs henv
+  (coreProgress n).2 htype hargs ctx
 
 end Moonbit.Mcore
