@@ -1543,6 +1543,8 @@ inductive CoreExpr : Expr → Prop where
   | switchConstant : CoreExpr obj → CoreExpr dflt →
       (∀ i (h : i < cases_.length), CoreExpr (cases_[i]'h).2) →
       CoreExpr (.switchConstant obj cases_ dflt)
+  | record : CoreArgs (fieldExprs.map fun x => x.2.2.2) →
+      CoreExpr (.record fieldExprs)
 
 inductive CoreArgs : List Expr → Prop where
   | nil : CoreArgs []
@@ -1671,6 +1673,9 @@ private theorem coreProgress_succ (n : Nat) (ih : CoreProgressAt n) :
           (ihE htobj hobj ctx)
           (fun i hi s'' nl'' => ihE (htbranches i hi) (hbranches i hi) ctx)
           (fun _ _ => ihE htdflt hdflt ctx)
+    | record h =>
+      cases htype with
+      | record ht => exact progress_record (ihArgs ht h ctx)
   · intro Γ Δ Λ F E τs ft env s jt lt nl es htype hargs ctx
     cases hargs with
     | nil => exact progress_args_nil _ _ _ _ _ _ _
