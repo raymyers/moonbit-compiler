@@ -1458,10 +1458,55 @@ The full combined theorem for all stub-free expressions would extend
 this pattern by threading the complete `ProgressCtx` + conditional
 hypotheses through recursive calls. -/
 
+/-- A Prim for which any well-typed invocation is supported by evalPrim.
+
+    These are `.not`, `.ignore`, `.identity` — the primitives where
+    `typeOfPrim op argTys ≠ none → PrimSupported op argTys`.
+
+    `.arith`/`.cmp`/`.neg`/`.stringLength`/`.stringEqual` are not always
+    safe because `typeOfPrim` accepts more argument types (int64, float,
+    string, etc.) than `PrimSupported` currently covers — a gap in the
+    `evalPrim` implementation rather than the type system. -/
+def SafePrim : Prim → Prop
+  | .not => True
+  | .ignore => True
+  | .identity => True
+  | _ => False
+
+/-- For safe prims, `typeOfPrim` implies `PrimSupported`. -/
+theorem SafePrim.to_primSupported
+    {op : Prim} {argTys : List Mtype} {τ : Mtype}
+    (hsafe : SafePrim op) (htype : typeOfPrim op argTys = some τ) :
+    PrimSupported op argTys := by
+  cases op <;> simp [SafePrim] at hsafe
+  · -- .not
+    cases argTys with
+    | nil => simp [typeOfPrim] at htype
+    | cons t ts =>
+      cases ts with
+      | nil =>
+        cases t <;> simp [typeOfPrim] at htype
+        · simp [PrimSupported]
+      | cons _ _ => simp [typeOfPrim] at htype
+  · -- .ignore
+    cases argTys with
+    | nil => simp [typeOfPrim] at htype
+    | cons t ts =>
+      cases ts with
+      | nil => simp [PrimSupported]
+      | cons _ _ => simp [typeOfPrim] at htype
+  · -- .identity
+    cases argTys with
+    | nil => simp [typeOfPrim] at htype
+    | cons t ts =>
+      cases ts with
+      | nil => simp [PrimSupported]
+      | cons _ _ => simp [typeOfPrim] at htype
+
 mutual
 
 /-- Scope for combined progress: leaves + pure propagators + .var +
-    typing-directed cases (.if, .and, .or). -/
+    typing-directed cases (.if, .and, .or, .prim). -/
 inductive CoreExpr : Expr → Prop where
   | const : CoreExpr (.const c)
   | unit : CoreExpr .unit
@@ -1488,6 +1533,7 @@ inductive CoreExpr : Expr → Prop where
       CoreExpr (.if condE ifso ifnot)
   | and_ : CoreExpr lhs → CoreExpr rhs → CoreExpr (.and lhs rhs)
   | or_ : CoreExpr lhs → CoreExpr rhs → CoreExpr (.or lhs rhs)
+  | prim : SafePrim op → CoreArgs argExprs → CoreExpr (.prim op argExprs)
 
 inductive CoreArgs : List Expr → Prop where
   | nil : CoreArgs []
@@ -1601,6 +1647,12 @@ private theorem coreProgress_succ (n : Nat) (ih : CoreProgressAt n) :
         exact progress_or htl ctx.envWT ctx.ftWT ctx.clInv ctx.fnDisj
           ctx.ftC ctx.jwt ctx.jdc ctx.llc ctx.hft
           (ihE htl hl ctx) (fun _ _ => ihE htr hr ctx)
+    | prim hsafe hargs =>
+      cases htype with
+      | prim htargs htypeOfPrim =>
+        exact progress_prim htargs (hsafe.to_primSupported htypeOfPrim)
+          ctx.envWT ctx.ftWT ctx.clInv ctx.fnDisj ctx.ftC ctx.jwt
+          ctx.jdc ctx.llc ctx.hft (ihArgs htargs hargs ctx)
   · intro Γ Δ Λ F E τs ft env s jt lt nl es htype hargs ctx
     cases hargs with
     | nil => exact progress_args_nil _ _ _ _ _ _ _
