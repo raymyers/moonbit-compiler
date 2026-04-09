@@ -628,6 +628,120 @@ theorem progress_and
       | false => simp [NotStuck]
     | _ => simp [NotStuck]
 
+theorem progress_apply_join
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype} {paramTys : List Mtype} {retTy : Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {func : Var} {argExprs : List Expr}
+    (hΔ : Δ func = some ⟨paramTys, retTy⟩)
+    (htype_args : HasTypeArgs Γ Δ Λ F E argExprs paramTys)
+    (hjparams_env_fresh : ∀ jparams jbody, jt func = some ⟨jparams, jbody⟩ →
+      ∀ p, p ∈ jparams → env p.binder = none)
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
+    (hhft : HeapFieldTyped F)
+    (ih_args : NotStuckArgs (evalFuelArgs n ft env s jt lt nl argExprs))
+    (ih_body : ∀ jparams jbody s' nl' vs,
+      jt func = some ⟨jparams, jbody⟩ →
+      jparams.length = vs.length →
+      NotStuck (evalFuel n ft (Env.bindParams env jparams vs) s' jt lt nl' jbody)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.apply func argExprs .join)) := by
+  simp only [evalFuel]
+  -- Get jt func from JoinDeltaConsistent
+  obtain ⟨jparams, jbody, hjt_func⟩ := hjdc func ⟨paramTys, retTy⟩ hΔ
+  simp only [hjt_func]
+  -- From JoinWellTyped.extract, get params.map (·.ty) = paramTys
+  obtain ⟨hjp_map, _, _⟩ := hjwt.extract hjt_func hΔ
+  -- Get env freshness for jparams
+  have hfresh_env : ∀ p, p ∈ jparams → env p.binder = none :=
+    hjparams_env_fresh jparams jbody hjt_func
+  have hfresh_not_any : ¬ ((jparams.any fun p => (env p.binder).isSome) = true) := by
+    simp only [List.any_eq_true, not_exists]
+    intro p ⟨hp, hsome⟩
+    have := hfresh_env p hp
+    rw [this] at hsome
+    exact absurd hsome (by simp)
+  simp only [if_neg hfresh_not_any]
+  cases hr : evalFuelArgs n ft env s jt lt nl argExprs with
+  | outOfFuelArgs => simp [NotStuck]
+  | stuckArgs msg => rw [hr] at ih_args; exact absurd ih_args id
+  | abortArgs o s' nl' => simp [NotStuck]
+  | okVals argVals s' nl' =>
+    simp only [hr]
+    -- Length matching
+    have hevalArgs := evalFuelArgs_sound_ok hr
+    have hapres := preservationArgs htype_args hevalArgs
+      henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+    have hvals_len : argVals.length = paramTys.length := hapres.hasTypes.length_eq
+    have hjparams_len : jparams.length = paramTys.length := by
+      rw [← hjp_map]; simp
+    have hlen : jparams.length = argVals.length := by omega
+    simp only [hlen, if_true]
+    have := ih_body jparams jbody s' nl' argVals hjt_func hlen
+    cases hb : evalFuel n ft (Env.bindParams env jparams argVals) s' jt lt nl' jbody with
+    | outOfFuel => simp [NotStuck, hb]
+    | stuck msg => rw [hb] at this; exact absurd this id
+    | ok o₂ s₂ nl₂ => simp [NotStuck, hb]
+
+theorem progress_apply_topFn
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype} {paramTys : List Mtype} {retTy : Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {func : Var} {argExprs : List Expr}
+    (hF : F func = some (paramTys, retTy))
+    (htype_args : HasTypeArgs Γ Δ Λ F E argExprs paramTys)
+    (hEnvFunc : env func = none)
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
+    (hhft : HeapFieldTyped F)
+    (ih_args : NotStuckArgs (evalFuelArgs n ft env s jt lt nl argExprs))
+    (ih_body : ∀ params body s' nl' vs,
+      ft func = some (params, body) →
+      params.length = vs.length →
+      NotStuck (evalFuel n ft (Env.bindParams Env.empty params vs)
+        s' JoinTable.empty LoopTable.empty nl' body)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl
+      (.apply func argExprs (.normal (.func paramTys retTy)))) := by
+  simp only [evalFuel]
+  simp only [hEnvFunc]
+  -- Get ft func from FnTableWellTyped
+  obtain ⟨params, body, hft_func, hparams_map, _, _⟩ := hft func paramTys retTy hF
+  simp only [hft_func]
+  cases hr : evalFuelArgs n ft env s jt lt nl argExprs with
+  | outOfFuelArgs => simp [NotStuck]
+  | stuckArgs msg => rw [hr] at ih_args; exact absurd ih_args id
+  | abortArgs o s' nl' => simp [NotStuck]
+  | okVals argVals s' nl' =>
+    simp only [hr]
+    -- Derive params.length = argVals.length from typing + preservationArgs
+    have hevalArgs := evalFuelArgs_sound_ok hr
+    have hapres := preservationArgs htype_args hevalArgs
+      henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+    have hvals_len : argVals.length = paramTys.length := hapres.hasTypes.length_eq
+    have hparams_len : params.length = paramTys.length := by
+      rw [← hparams_map]; simp
+    have hlen : params.length = argVals.length := by omega
+    -- Apply IH on body
+    have := ih_body params body s' nl' argVals hft_func hlen
+    simp only [hlen, if_true]
+    cases hb : evalFuel n ft (Env.bindParams Env.empty params argVals) s'
+                JoinTable.empty LoopTable.empty nl' body with
+    | outOfFuel => simp [NotStuck, hb]
+    | stuck msg => rw [hb] at this; exact absurd this id
+    | ok o₂ s₂ nl₂ => simp [NotStuck, hb]
+
 theorem progress_field_tuple
     {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
     {E : Option Mtype} {τ : Mtype} {τs : List Mtype}
