@@ -114,6 +114,23 @@ theorem HeapAvail.of_storeWellTyped {s : Store} {σ : StoreTyping} {F : FnTyTabl
   obtain ⟨fields, mutFlags, hs, hsize, _⟩ := hswt l ats hσ
   exact ⟨fields, mutFlags, hs, hsize⟩
 
+/-- **HeapLocPresent**: every location with a `.constr tid ats` type has
+    a record in the store with the right number of fields.
+
+    This is the "backward" direction of heap typing (type → store) that
+    `HeapFieldTyped` doesn't cover. It's the progress analog of
+    `HeapFieldTyped`: callers of progress must supply it as an explicit
+    invariant, paralleling how `preservation` takes `HeapFieldTyped`.
+
+    Becomes derivable once `ValueHasType.locConstr` is parameterized by
+    a store typing σ linked to the runtime store (same refactor as for
+    `HeapFieldTyped`). -/
+def HeapLocPresent (s : Store) : Prop :=
+  ∀ (l : Loc) (tid : Nat) (ats : List Mtype),
+    ValueHasType (.loc l) (.constr tid ats) →
+    ∃ fields mutFlags, s l = some (.record fields mutFlags) ∧
+      fields.size = ats.length
+
 /-! ## NotStuck helper
 
 A predicate distinguishing the three result kinds. -/
@@ -1124,6 +1141,59 @@ theorem progress_apply_topFn
     | outOfFuel => simp [NotStuck, hb]
     | stuck msg => rw [hb] at this; exact absurd this id
     | ok o₂ s₂ nl₂ => simp [NotStuck, hb]
+
+/-- Progress for `.field rec_ acc pos` on a full `.constr tid ats` type,
+    handling both the `.constr tag args` and `.loc l` subcases via
+    `canonical_constr` + `HeapLocPresent`. -/
+theorem progress_field_heap
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype} {tid : Nat} {ats : List Mtype} {fieldTy : Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {rec_ : Expr} {acc : Accessor} {pos : Nat}
+    (htype_rec : HasType Γ Δ Λ F E rec_ (.constr tid ats))
+    (hpos : ats[pos]? = some fieldTy)
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
+    (hhft : HeapFieldTyped F)
+    (hhlp : ∀ s' nl' o, evalFuel n ft env s jt lt nl rec_ = .ok o s' nl' →
+            HeapLocPresent s')
+    (ih : NotStuck (evalFuel n ft env s jt lt nl rec_)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.field rec_ acc pos)) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl rec_ with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih; exact absurd ih id
+  | ok o s' nl' =>
+    cases o with
+    | val v =>
+      have heval := evalFuel_sound hr
+      have hvt := preservation_val htype_rec heval
+        henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+      have hposLt : pos < ats.length := by
+        by_contra hlt; push_neg at hlt
+        simp [List.getElem?_eq_none_iff.mpr (by omega)] at hpos
+      rcases canonical_constr hvt with
+        ⟨tag, args, rfl, hargs⟩ | ⟨l, rfl⟩
+      · -- .constr case
+        have hlen_args : pos < args.length := by
+          rw [hargs.length_eq]; exact hposLt
+        have hgetv : args[pos]? = some (args[pos]'hlen_args) := by
+          simp [List.getElem?_eq_getElem hlen_args]
+        simp [hgetv, NotStuck]
+      · -- .loc case — use HeapLocPresent on s'
+        have hhlp' : HeapLocPresent s' := hhlp s' nl' _ hr
+        obtain ⟨fields, mutFlags, hstore, hsize⟩ := hhlp' l tid ats hvt
+        have hlen_fields : pos < fields.size := by rw [hsize]; exact hposLt
+        have hgetv : fields[pos]? = some (fields[pos]'hlen_fields) :=
+          Array.getElem?_eq_getElem hlen_fields
+        simp [hstore, hgetv, NotStuck]
+    | _ => simp [NotStuck]
 
 theorem progress_field_tuple
     {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
