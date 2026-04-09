@@ -165,4 +165,323 @@ theorem progress_breakNone
     NotStuck (evalFuel (n+1) ft env s jt lt nl (.break none label)) := by
   simp [evalFuel, NotStuck]
 
+/-! ## Stub-case eliminators
+
+`StubFree` has no constructor for `.letrec`, `.letfn _ _ _ _ .recursive`,
+or `.loop _ _ _ _`, so inversion immediately discharges these cases.
+They appear as vacuous branches in any progress proof that takes a
+`StubFree e` hypothesis. -/
+
+theorem StubFree.not_letrec {bindings : List (Var × List Param × Expr)} {body : Expr}
+    (h : StubFree (.letrec bindings body)) : False := by cases h
+
+theorem StubFree.not_letfnRec {name : Var} {params : List Param}
+    {fnBody body : Expr}
+    (h : StubFree (.letfn name params fnBody body .recursive)) : False := by cases h
+
+theorem StubFree.not_loop {params : List Param} {body : Expr}
+    {argExprs : List Expr} {label : LoopLabel}
+    (h : StubFree (.loop params body argExprs label)) : False := by cases h
+
+/-! ## Inversion lemmas for StubFree
+
+These expose sub-expression `StubFree` proofs for each constructor,
+used by the recursive cases of the progress proof. -/
+
+theorem StubFree.of_let {name : Var} {rhs body : Expr}
+    (h : StubFree (.let name rhs body)) :
+    StubFree rhs ∧ StubFree body := by cases h; exact ⟨‹_›, ‹_›⟩
+
+theorem StubFree.of_letfnNonrec {name : Var} {params : List Param} {fnBody body : Expr}
+    (h : StubFree (.letfn name params fnBody body .nonRecursive)) :
+    StubFree fnBody ∧ StubFree body := by cases h; exact ⟨‹_›, ‹_›⟩
+
+theorem StubFree.of_letfnTailJoin {name : Var} {params : List Param} {fnBody body : Expr}
+    (h : StubFree (.letfn name params fnBody body .tailJoin)) :
+    StubFree fnBody ∧ StubFree body := by cases h; exact ⟨‹_›, ‹_›⟩
+
+theorem StubFree.of_letfnNontailJoin {name : Var} {params : List Param}
+    {fnBody body : Expr}
+    (h : StubFree (.letfn name params fnBody body .nontailJoin)) :
+    StubFree fnBody ∧ StubFree body := by cases h; exact ⟨‹_›, ‹_›⟩
+
+theorem StubFree.of_if {condE ifso : Expr} {ifnot : Option Expr}
+    (h : StubFree (.if condE ifso ifnot)) :
+    StubFree condE ∧ StubFree ifso ∧ (∀ e, ifnot = some e → StubFree e) := by
+  cases h; exact ⟨‹_›, ‹_›, ‹_›⟩
+
+theorem StubFree.of_and {lhs rhs : Expr} (h : StubFree (.and lhs rhs)) :
+    StubFree lhs ∧ StubFree rhs := by cases h; exact ⟨‹_›, ‹_›⟩
+
+theorem StubFree.of_or {lhs rhs : Expr} (h : StubFree (.or lhs rhs)) :
+    StubFree lhs ∧ StubFree rhs := by cases h; exact ⟨‹_›, ‹_›⟩
+
+theorem StubFree.of_assign {x : Var} {e : Expr} (h : StubFree (.assign x e)) :
+    StubFree e := by cases h; exact ‹_›
+
+theorem StubFree.of_return {e : Expr} {kind : ReturnKind}
+    (h : StubFree (.return e kind)) : StubFree e := by cases h; exact ‹_›
+
+theorem StubFree.of_object {self : Expr} (h : StubFree (.object self)) :
+    StubFree self := by cases h; exact ‹_›
+
+theorem StubFree.of_handleError {obj : Expr} {kind : HandleKind}
+    (h : StubFree (.handleError obj kind)) : StubFree obj := by cases h; exact ‹_›
+
+theorem StubFree.of_breakSome {arg : Expr} {label : LoopLabel}
+    (h : StubFree (.break (some arg) label)) : StubFree arg := by
+  cases h; exact ‹_›
+
+theorem StubFree.of_continue {argExprs : List Expr} {label : LoopLabel}
+    (h : StubFree (.continue argExprs label)) : StubFreeArgs argExprs := by
+  cases h; exact ‹_›
+
+theorem StubFree.of_prim {op : Prim} {argExprs : List Expr}
+    (h : StubFree (.prim op argExprs)) : StubFreeArgs argExprs := by
+  cases h; exact ‹_›
+
+theorem StubFree.of_constr {tag : ConstrTag} {argExprs : List Expr}
+    (h : StubFree (.constr tag argExprs)) : StubFreeArgs argExprs := by
+  cases h; exact ‹_›
+
+theorem StubFree.of_tuple {exprs : List Expr}
+    (h : StubFree (.tuple exprs)) : StubFreeArgs exprs := by
+  cases h; exact ‹_›
+
+theorem StubFree.of_field {rec_ : Expr} {acc : Accessor} {pos : Nat}
+    (h : StubFree (.field rec_ acc pos)) : StubFree rec_ := by
+  cases h; exact ‹_›
+
+theorem StubFree.of_mutate {rec_ fld : Expr} {label : FieldLabel} {pos : Nat}
+    (h : StubFree (.mutate rec_ label fld pos)) :
+    StubFree rec_ ∧ StubFree fld := by cases h; exact ⟨‹_›, ‹_›⟩
+
+theorem StubFree.of_seq {exprs : List Expr} {last : Expr}
+    (h : StubFree (.seq exprs last)) :
+    StubFreeArgs exprs ∧ StubFree last := by cases h; exact ⟨‹_›, ‹_›⟩
+
+theorem StubFree.of_apply {func : Var} {argExprs : List Expr} {kind : ApplyKind}
+    (h : StubFree (.apply func argExprs kind)) :
+    StubFreeArgs argExprs := by cases h; exact ‹_›
+
+theorem StubFreeArgs.head {e : Expr} {es : List Expr}
+    (h : StubFreeArgs (e :: es)) : StubFree e := by
+  cases h with | cons he hes => exact he
+
+theorem StubFreeArgs.tail {e : Expr} {es : List Expr}
+    (h : StubFreeArgs (e :: es)) : StubFreeArgs es := by
+  cases h with | cons he hes => exact hes
+
+/-! ## NotStuck for argument evaluation -/
+
+def NotStuckArgs : EvalFuelArgsResult → Prop
+  | .stuckArgs _ => False
+  | _ => True
+
+@[simp] theorem NotStuckArgs.okVals : NotStuckArgs (.okVals vs s' nl') := trivial
+@[simp] theorem NotStuckArgs.abortArgs : NotStuckArgs (.abortArgs o s' nl') := trivial
+@[simp] theorem NotStuckArgs.outOfFuelArgs : NotStuckArgs .outOfFuelArgs := trivial
+@[simp] theorem NotStuckArgs.stuck (msg : String) :
+    ¬ NotStuckArgs (.stuckArgs msg) := id
+
+/-! ## Simple propagator lemmas
+
+These progress lemmas take an IH for the sub-expression's progress and
+propagate it to the outer expression. They don't need typing info
+because the outer expression never inspects the result's shape — it
+just wraps aborts as-is and returns val outcomes directly. -/
+
+theorem progress_return_single
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {e : Expr}
+    (ih : NotStuck (evalFuel n ft env s jt lt nl e)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.return e .singleValue)) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl e with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih; exact absurd ih id
+  | ok o s' nl' => cases o <;> simp [NotStuck]
+
+theorem progress_assign
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {x : Var} {e : Expr}
+    (ih : NotStuck (evalFuel n ft env s jt lt nl e)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.assign x e)) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl e with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih; exact absurd ih id
+  | ok o s' nl' => cases o <;> simp [NotStuck]
+
+theorem progress_object
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {self : Expr}
+    (ih : NotStuck (evalFuel n ft env s jt lt nl self)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.object self)) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl self with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih; exact absurd ih id
+  | ok o s' nl' => cases o <;> simp [NotStuck]
+
+theorem progress_break_some
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {arg : Expr} {label : LoopLabel}
+    (ih : NotStuck (evalFuel n ft env s jt lt nl arg)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.break (some arg) label)) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl arg with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih; exact absurd ih id
+  | ok o s' nl' => cases o <;> simp [NotStuck]
+
+theorem progress_continue
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {argExprs : List Expr} {label : LoopLabel}
+    (ih : NotStuckArgs (evalFuelArgs n ft env s jt lt nl argExprs)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.continue argExprs label)) := by
+  simp only [evalFuel]
+  cases hr : evalFuelArgs n ft env s jt lt nl argExprs with
+  | outOfFuelArgs => simp [NotStuck]
+  | stuckArgs msg => rw [hr] at ih; exact absurd ih id
+  | abortArgs o s' nl' => simp [NotStuck]
+  | okVals vs s' nl' => simp [NotStuck]
+
+theorem progress_constr
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {tag : ConstrTag} {argExprs : List Expr}
+    (ih : NotStuckArgs (evalFuelArgs n ft env s jt lt nl argExprs)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.constr tag argExprs)) := by
+  simp only [evalFuel]
+  cases hr : evalFuelArgs n ft env s jt lt nl argExprs with
+  | outOfFuelArgs => simp [NotStuck]
+  | stuckArgs msg => rw [hr] at ih; exact absurd ih id
+  | abortArgs o s' nl' => simp [NotStuck]
+  | okVals vs s' nl' => simp [NotStuck]
+
+theorem progress_tuple
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {exprs : List Expr}
+    (ih : NotStuckArgs (evalFuelArgs n ft env s jt lt nl exprs)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.tuple exprs)) := by
+  simp only [evalFuel]
+  cases hr : evalFuelArgs n ft env s jt lt nl exprs with
+  | outOfFuelArgs => simp [NotStuck]
+  | stuckArgs msg => rw [hr] at ih; exact absurd ih id
+  | abortArgs o s' nl' => simp [NotStuck]
+  | okVals vs s' nl' => simp [NotStuck]
+
+theorem progress_record
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc}
+    {fieldExprs : List (FieldLabel × Nat × Bool × Expr)}
+    (ih : NotStuckArgs (evalFuelArgs n ft env s jt lt nl
+            (fieldExprs.map fun x => x.2.2.2))) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.record fieldExprs)) := by
+  simp only [evalFuel]
+  cases hr : evalFuelArgs n ft env s jt lt nl
+              (fieldExprs.map fun x => x.2.2.2) with
+  | outOfFuelArgs => simp [NotStuck]
+  | stuckArgs msg => rw [hr] at ih; exact absurd ih id
+  | abortArgs o s' nl' => simp [NotStuck]
+  | okVals vs s' nl' => simp [NotStuck]
+
+theorem progress_array
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {exprs : List Expr}
+    (ih : NotStuckArgs (evalFuelArgs n ft env s jt lt nl exprs)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.array exprs)) := by
+  simp only [evalFuel]
+  cases hr : evalFuelArgs n ft env s jt lt nl exprs with
+  | outOfFuelArgs => simp [NotStuck]
+  | stuckArgs msg => rw [hr] at ih; exact absurd ih id
+  | abortArgs o s' nl' => simp [NotStuck]
+  | okVals vs s' nl' => simp [NotStuck]
+
+theorem progress_seq
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {exprs : List Expr} {last : Expr}
+    (ihargs : NotStuckArgs (evalFuelArgs n ft env s jt lt nl exprs))
+    (ihlast : ∀ s' nl', NotStuck (evalFuel n ft env s' jt lt nl' last)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.seq exprs last)) := by
+  simp only [evalFuel]
+  cases hr : evalFuelArgs n ft env s jt lt nl exprs with
+  | outOfFuelArgs => simp [NotStuck]
+  | stuckArgs msg => rw [hr] at ihargs; exact absurd ihargs id
+  | abortArgs o s' nl' => simp [NotStuck]
+  | okVals vs s' nl' =>
+    simp only [hr]
+    have := ihlast s' nl'
+    cases hlast : evalFuel n ft env s' jt lt nl' last with
+    | outOfFuel => simp [NotStuck]
+    | stuck msg => rw [hlast] at this; exact absurd this id
+    | ok o₂ s₂ nl₂ => simp [NotStuck]
+
+theorem progress_return_errorResult
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {e : Expr} {isErr : Bool} {retTy : Mtype}
+    (ih : NotStuck (evalFuel n ft env s jt lt nl e)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl
+      (.return e (.errorResult isErr retTy))) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl e with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih; exact absurd ih id
+  | ok o s' nl' =>
+    cases o with
+    | val v => cases isErr <;> simp [NotStuck]
+    | _ => simp [NotStuck]
+
+theorem progress_handleError_toResult
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {obj : Expr}
+    (ih : NotStuck (evalFuel n ft env s jt lt nl obj)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.handleError obj .toResult)) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl obj with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih; exact absurd ih id
+  | ok o s' nl' => cases o <;> simp [NotStuck]
+
+theorem progress_handleError_returnErr
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {obj : Expr} {okTy : Mtype}
+    (ih : NotStuck (evalFuel n ft env s jt lt nl obj)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl
+      (.handleError obj (.returnErr okTy))) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl obj with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih; exact absurd ih id
+  | ok o s' nl' => cases o <;> simp [NotStuck]
+
+/-! ## Progress for `evalFuelArgs` base case -/
+
+theorem progress_args_nil
+    (n : Nat) (ft : FnTable) (env : Env) (s : Store) (jt : JoinTable)
+    (lt : LoopTable) (nl : Loc) :
+    NotStuckArgs (evalFuelArgs (n+1) ft env s jt lt nl []) := by
+  simp [evalFuelArgs, NotStuckArgs]
+
+theorem progress_args_cons
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {e : Expr} {es : List Expr}
+    (ihe : NotStuck (evalFuel n ft env s jt lt nl e))
+    (ihes : ∀ s' nl', NotStuckArgs (evalFuelArgs n ft env s' jt lt nl' es)) :
+    NotStuckArgs (evalFuelArgs (n+1) ft env s jt lt nl (e :: es)) := by
+  simp only [evalFuelArgs]
+  cases hr : evalFuel n ft env s jt lt nl e with
+  | outOfFuel => simp [NotStuckArgs]
+  | stuck msg => rw [hr] at ihe; exact absurd ihe id
+  | ok o s' nl' =>
+    cases o with
+    | val v =>
+      cases hrs : evalFuelArgs n ft env s' jt lt nl' es with
+      | outOfFuelArgs => simp only [hrs]; simp [NotStuckArgs]
+      | stuckArgs msg =>
+        have := ihes s' nl'; rw [hrs] at this; exact absurd this id
+      | abortArgs oA sA nlA => simp only [hrs]; simp [NotStuckArgs]
+      | okVals vs sR nlR => simp only [hrs]; simp [NotStuckArgs]
+    | _ => simp [NotStuckArgs]
+
 end Moonbit.Mcore
