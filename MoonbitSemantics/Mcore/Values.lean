@@ -22,6 +22,11 @@ inductive Value where
   | const (c : Moonbit.Clam.Const)
   | unit
   | closure (captured : Var → Option Value) (params : List Param) (body : Expr)
+  /-- Recursive closure: like `closure` but knows its own binding name,
+      so applying it extends the captured env with the closure itself
+      at apply time. Used for `letfn _ _ _ _ .recursive` and `letrec`. -/
+  | closureRec (captured : Var → Option Value) (recName : Var)
+      (params : List Param) (body : Expr)
   | rawFn (params : List Param) (body : Expr)
   | constr (tag : ConstrTag) (args : List Value)
   | tuple (vals : List Value)

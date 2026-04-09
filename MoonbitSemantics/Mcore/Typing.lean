@@ -451,6 +451,8 @@ inductive ValueHasType : Value → Mtype → Prop where
     ValueHasType .unit .unit
   | closure :
     ValueHasType (.closure captured params body) (.func (params.map (·.ty)) retTy)
+  | closureRec :
+    ValueHasType (.closureRec captured recName params body) (.func (params.map (·.ty)) retTy)
   | rawFn :
     ValueHasType (.rawFn params body) (.rawFunc (params.map (·.ty)) retTy)
   | constr :
@@ -490,7 +492,9 @@ def EnvWellTyped (env : Env) (Γ : TyEnv) : Prop :=
 /-- Top-level functions and env closures don't overlap for the same variable. -/
 def FnEnvDisjoint (env : Env) (F : FnTyTable) : Prop :=
   (∀ func cap ps bd, env func = some (.closure cap ps bd) → F func = none) ∧
-  (∀ func ps bd, env func = some (.rawFn ps bd) → F func = none)
+  (∀ func ps bd, env func = some (.rawFn ps bd) → F func = none) ∧
+  (∀ func cap recName ps bd,
+    env func = some (.closureRec cap recName ps bd) → F func = none)
 
 /-- A single value satisfies the closure invariant.
     For closures, provides body typing + ClosureInvariant for captured env. -/
