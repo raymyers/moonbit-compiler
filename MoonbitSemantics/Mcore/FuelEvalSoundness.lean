@@ -19,6 +19,32 @@ namespace Moonbit.Mcore
 
 open Moonbit.Clam (Const Prim ArithOp CmpOp)
 
+/-! ## Loop soundness helpers -/
+
+/-- Convert a `LoopReentry` derivation into an `Eval .loop`, given the
+    args evaluation and freshness conditions. Dispatches on LoopReentry's
+    constructor to pick the matching `Eval.loop*` rule. -/
+private theorem loopReentryToEval
+    {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc}
+    {params : List Param} {body : Expr} {argExprs : List Expr}
+    {label : LoopLabel} {argVals : List Value}
+    {s₁ : Store} {nl₁ : Loc}
+    {o : Outcome} {sr : Store} {nlr : Loc}
+    (hlt : lt label = none)
+    (hparams : ∀ p, p ∈ params → env p.binder = none)
+    (hargs : EvalArgs ft env s jt lt nl argExprs argVals s₁ nl₁)
+    (hreentry : LoopReentry ft env s₁ jt lt nl₁ params body argVals label o sr nlr) :
+    Eval ft env s jt lt nl (.loop params body argExprs label) o sr nlr := by
+  cases hreentry with
+  | val hbody => exact Eval.loopVal hlt hparams hargs hbody
+  | breakSome hbody => exact Eval.loopBreak hlt hparams hargs hbody
+  | breakNone hbody => exact Eval.loopBreakNone hlt hparams hargs hbody
+  | «continue» hbody hlen hreentry' =>
+    exact Eval.loopContinue hlt hparams hargs hbody hlen.symm hreentry'
+  | «return» hbody => exact Eval.loopReturn hlt hparams hargs hbody
+  | error hbody => exact Eval.loopError hlt hparams hargs hbody
+
 /-! ## Combined soundness proposition for induction -/
 
 /-- Bundle the three soundness statements at a fuel level for mutual
@@ -52,6 +78,74 @@ and on the list (for the args parts).
 Since the proof is long, we prove it via three mutually independent lemmas,
 each handling one of the three statements in `SoundnessAt`. -/
 
+/-- Soundness of `loopIter`: when called with `eval_fuel = n+1`, body
+    evaluations happen at fuel `n`, so the IH `ihE : SoundnessAt n`
+    directly covers them. Each iteration matches one step in
+    `LoopReentry`'s inductive structure. -/
+private theorem loopIter_sound {n : Nat}
+    (ihE : ∀ {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+      {lt : LoopTable} {nl : Loc} {e : Expr}
+      {o : Outcome} {s' : Store} {nl' : Loc},
+      evalFuel n ft env s jt lt nl e = .ok o s' nl' →
+      Eval ft env s jt lt nl e o s' nl') :
+    ∀ (iter : Nat) {ft : FnTable} {env : Env}
+      {params : List Param} {body : Expr} {argVals : List Value}
+      {label : LoopLabel} {s : Store} {jt : JoinTable} {lt : LoopTable}
+      {nl : Loc} {o : Outcome} {s' : Store} {nl' : Loc},
+    loopIter iter (n+1) ft env params body argVals label s jt lt nl =
+        .ok o s' nl' →
+    LoopReentry ft env s jt lt nl params body argVals label o s' nl' := by
+  intro iter
+  induction iter with
+  | zero =>
+    intro ft env params body argVals label s jt lt nl o s' nl' h
+    simp [loopIter] at h
+  | succ k ih =>
+    intro ft env params body argVals label s jt lt nl o s' nl' h
+    simp only [loopIter] at h
+    cases hbody : evalFuel n ft (Env.bindParams env params argVals) s jt
+                  (LoopTable.extend lt label ⟨params, body⟩) nl body with
+    | outOfFuel => simp only [hbody] at h; simp at h
+    | stuck r => simp only [hbody] at h; simp at h
+    | ok oBody sBody nlBody =>
+      have hbody_eval := ihE hbody
+      cases oBody with
+      | val v =>
+        simp only [hbody] at h
+        cases h
+        exact LoopReentry.val hbody_eval
+      | «break» vOpt lbl =>
+        cases vOpt with
+        | none =>
+          simp only [hbody] at h
+          split at h
+          · rename_i hlbl; subst hlbl
+            cases h; exact LoopReentry.breakNone hbody_eval
+          · exact absurd h (by simp)
+        | some v =>
+          simp only [hbody] at h
+          split at h
+          · rename_i hlbl; subst hlbl
+            cases h; exact LoopReentry.breakSome hbody_eval
+          · exact absurd h (by simp)
+      | «continue» newVals lbl =>
+        simp only [hbody] at h
+        split at h
+        · rename_i hlbl; subst hlbl
+          split at h
+          · rename_i hlen
+            exact LoopReentry.continue hbody_eval hlen.symm (ih h)
+          · exact absurd h (by simp)
+        · exact absurd h (by simp)
+      | «return» v =>
+        simp only [hbody] at h
+        cases h
+        exact LoopReentry.return hbody_eval
+      | error v =>
+        simp only [hbody] at h
+        cases h
+        exact LoopReentry.error hbody_eval
+
 /-- Step case for the `evalFuel` soundness. -/
 private theorem soundness_step_eval (n : Nat) (ih : SoundnessAt n) :
     ∀ {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
@@ -83,10 +177,13 @@ private theorem soundness_step_eval (n : Nat) (ih : SoundnessAt n) :
       | none => exact Eval.var hx
       | some p => exact Eval.varPrim hx
   | «function» params fnBody isRaw =>
-    simp only [evalFuel] at h
     cases isRaw with
-    | false => rcases h with ⟨rfl, rfl, rfl⟩; exact Eval.function
-    | true => rcases h with ⟨rfl, rfl, rfl⟩; exact Eval.rawFunction
+    | false =>
+      simp only [evalFuel] at h
+      rcases h with ⟨rfl, rfl, rfl⟩; exact Eval.function
+    | true =>
+      simp only [evalFuel] at h
+      rcases h with ⟨rfl, rfl, rfl⟩; exact Eval.rawFunction
 
   -- Let-binding
   | «let» name rhs body =>
@@ -112,22 +209,26 @@ private theorem soundness_step_eval (n : Nat) (ih : SoundnessAt n) :
   -- Local function bindings (only the non-recursive cases are implemented;
   -- .recursive is stubbed)
   | letfn name params fnBody body kind =>
-    simp only [evalFuel] at h
     cases kind with
     | nonRecursive =>
+      simp only [evalFuel] at h
       cases hname : env name with
       | some _ => rw [hname] at h; simp at h
       | none =>
         rw [hname] at h
         exact Eval.letfnNonrec hname (ihE h)
-    | recursive => simp at h  -- stub: .stuck "TODO"
+    | recursive =>
+      simp only [evalFuel] at h
+      simp at h  -- stub: .stuck "TODO"
     | tailJoin =>
+      simp only [evalFuel] at h
       cases hname : jt name with
       | some _ => rw [hname] at h; simp at h
       | none =>
         rw [hname] at h
         exact Eval.letfnTailJoin hname (ihE h)
     | nontailJoin =>
+      simp only [evalFuel] at h
       cases hname : jt name with
       | some _ => rw [hname] at h; simp at h
       | none =>
@@ -536,19 +637,49 @@ private theorem soundness_step_eval (n : Nat) (ih : SoundnessAt n) :
         cases h
         exact Eval.switchConstantAbort (ihE ho) (by simp [Outcome.isAbort])
 
-  -- Loops (stub)
-  | loop _ _ _ _ =>
+  -- Loops
+  | loop params body argExprs label =>
     simp only [evalFuel] at h
-    simp at h
+    cases hlt : lt label with
+    | some _ => simp only [hlt] at h; simp at h
+    | none =>
+      simp only [hlt] at h
+      split at h
+      · exact absurd h (by simp)
+      · rename_i hfresh
+        cases hargs : evalFuelArgs n ft env s jt lt nl argExprs with
+        | outOfFuelArgs => simp only [hargs] at h; simp at h
+        | stuckArgs _ => simp only [hargs] at h; simp at h
+        | abortArgs oA sA nlA =>
+          simp only [hargs] at h
+          cases h
+          exact Eval.loopAbort (ihAabort hargs).1
+        | okVals argVals s₁ nl₁ =>
+          simp only [hargs] at h
+          split at h
+          · rename_i hlen
+            have hparams_fresh : ∀ p, p ∈ params → env p.binder = none := by
+              intro p hp
+              by_contra hne
+              apply absurd hfresh
+              simp only [ne_eq, not_not]
+              refine List.any_eq_true.mpr ⟨p, hp, ?_⟩
+              exact Option.isSome_iff_ne_none.mpr hne
+            -- h : loopIter (n+1) (n+1) ft env params body argVals label s₁ jt lt nl₁ = .ok o s' nl'
+            -- Build a LoopReentry derivation via loopIter_sound, then convert to Eval
+            have hreentry := loopIter_sound ihE (n+1) h
+            exact loopReentryToEval hlt hparams_fresh (ihAok hargs) hreentry
+          · exact absurd h (by simp)
 
   -- Break / continue
   | «break» argOpt label =>
-    simp only [evalFuel] at h
     cases argOpt with
     | none =>
+      simp only [evalFuel] at h
       cases h
       exact Eval.breakNone
     | some arg =>
+      simp only [evalFuel] at h
       cases harg : evalFuel n ft env s jt lt nl arg with
       | outOfFuel => simp only [harg] at h; simp at h
       | stuck _ => simp only [harg] at h; simp at h

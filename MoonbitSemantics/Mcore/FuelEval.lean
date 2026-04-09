@@ -347,10 +347,23 @@ def evalFuel : Nat → FnTable → Env → Store → JoinTable → LoopTable →
       | .stuck r => .stuck r
 
     -- ════════ Loops ════════
-    | .loop _ _ _ _ =>
-      -- loopVal/loopBreak/loopBreakNone are easy, but loopContinue needs
-      -- LoopReentry re-invocation. Deferred to a later sub-phase.
-      .stuck "TODO: loop"
+    | .loop params body argExprs label =>
+      match lt label with
+      | some _ => .stuck "loop: label not fresh in lt"
+      | none =>
+        if params.any (fun p => (env p.binder).isSome) then
+          .stuck "loop: param binder not fresh in env"
+        else
+          match evalFuelArgs n ft env s jt lt nl argExprs with
+          | .okVals argVals s₁ nl₁ =>
+            if params.length = argVals.length then
+              -- Pass (n+1, n+1) so inside loopIter, body eval uses fuel n
+              -- matching the outer IH level.
+              loopIter (n+1) (n+1) ft env params body argVals label s₁ jt lt nl₁
+            else .stuck "loop: param/arg length mismatch"
+          | .abortArgs o s₁ nl₁ => .ok o s₁ nl₁
+          | .outOfFuelArgs => .outOfFuel
+          | .stuckArgs r => .stuck r
 
     -- ════════ Break / continue ════════
     | .break argOpt label =>
@@ -454,6 +467,39 @@ def evalFuelArgs : Nat → FnTable → Env → Store → JoinTable → LoopTable
     | .ok o s₁ nl₁ => .abortArgs o s₁ nl₁
     | .outOfFuel => .outOfFuelArgs
     | .stuck r => .stuckArgs r
+
+/-- One iteration of a loop body with params bound to `argVals`.
+    Mirrors `LoopReentry`: takes the **base** `lt` (without this loop's
+    extension) and extends internally. On `.continue` with matching label,
+    re-enters with new values; on mismatched break/continue labels,
+    returns stuck (matching Eval's undefined behavior). Takes two fuel
+    parameters: `iter_fuel` bounds iteration count; `eval_fuel` is used
+    for each body evaluation (constant across iterations so that
+    soundness can use a single `SoundnessAt eval_fuel` hypothesis). -/
+def loopIter : Nat → Nat → FnTable → Env → List Param → Expr → List Value →
+    LoopLabel → Store → JoinTable → LoopTable → Loc → EvalFuelResult
+  | 0, _, _, _, _, _, _, _, _, _, _, _ => .outOfFuel
+  | _+1, 0, _, _, _, _, _, _, _, _, _, _ => .outOfFuel
+  | iter+1, eval+1, ft, env, params, body, argVals, label, s, jt, lt, nl =>
+    match evalFuel eval ft (Env.bindParams env params argVals) s jt
+              (LoopTable.extend lt label ⟨params, body⟩) nl body with
+    | .ok (.val v) s' nl' => .ok (.val v) s' nl'
+    | .ok (.break (some v) lbl) s' nl' =>
+      if lbl = label then .ok (.val v) s' nl'
+      else .stuck "loopBreak: label mismatch"
+    | .ok (.break none lbl) s' nl' =>
+      if lbl = label then .ok (.val .unit) s' nl'
+      else .stuck "loopBreakNone: label mismatch"
+    | .ok (.continue newVals lbl) s' nl' =>
+      if lbl = label then
+        if params.length = newVals.length then
+          loopIter iter (eval+1) ft env params body newVals label s' jt lt nl'
+        else .stuck "loopContinue: param/arg length mismatch"
+      else .stuck "loopContinue: label mismatch"
+    | .ok (.return v) s' nl' => .ok (.return v) s' nl'
+    | .ok (.error v) s' nl' => .ok (.error v) s' nl'
+    | .outOfFuel => .outOfFuel
+    | .stuck r => .stuck r
 
 end
 

@@ -69,6 +69,8 @@ inductive StubFree : Expr → Prop where
       StubFree (.mutate rec_ label fld pos)
   | assign : StubFree e → StubFree (.assign x e)
   | seq : StubFreeArgs exprs → StubFree last → StubFree (.seq exprs last)
+  | loop : StubFree body → StubFreeArgs argExprs →
+      StubFree (.loop params body argExprs label)
   | «if» : StubFree condE → StubFree ifso →
       (∀ e, ifnot = some e → StubFree e) →
       StubFree (.if condE ifso ifnot)
@@ -221,9 +223,8 @@ theorem StubFree.not_letfnRec {name : Var} {params : List Param}
     {fnBody body : Expr}
     (h : StubFree (.letfn name params fnBody body .recursive)) : False := by cases h
 
-theorem StubFree.not_loop {params : List Param} {body : Expr}
-    {argExprs : List Expr} {label : LoopLabel}
-    (h : StubFree (.loop params body argExprs label)) : False := by cases h
+-- NOTE: `.loop` is no longer a stub (closed via loopIter in FuelEval +
+-- loopIter_sound in FuelEvalSoundness). No more `StubFree.not_loop`.
 
 /-! ## Inversion lemmas for StubFree
 
