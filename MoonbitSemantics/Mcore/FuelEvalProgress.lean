@@ -1470,6 +1470,8 @@ inductive CoreExpr : Expr → Prop where
   | function : CoreExpr (.function params fnBody isRaw)
   | constr : CoreArgs argExprs → CoreExpr (.constr tag argExprs)
   | tuple : CoreArgs exprs → CoreExpr (.tuple exprs)
+  | array : CoreArgs exprs → CoreExpr (.array exprs)
+  | seq : CoreArgs exprs → CoreExpr last → CoreExpr (.seq exprs last)
   | assign : CoreExpr e → CoreExpr (.assign x e)
   | object : CoreExpr self → CoreExpr (.object self)
   | breakNone : CoreExpr (.break none label)
@@ -1512,6 +1514,9 @@ private theorem coreProgress_succ (n : Nat) (ih : CoreProgressAt n) :
     | function => exact progress_function _ _ _ _ _ _ _ _ _ _
     | constr h => exact progress_constr (ihArgs h)
     | tuple h => exact progress_tuple (ihArgs h)
+    | array h => exact progress_array (ihArgs h)
+    | seq hargs hlast =>
+      exact progress_seq (ihArgs hargs) (fun _ _ => ihE hlast)
     | assign h => exact progress_assign (ihE h)
     | object h => exact progress_object (ihE h)
     | breakNone => exact progress_breakNone _ _ _ _ _ _ _ _
