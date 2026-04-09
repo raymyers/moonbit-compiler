@@ -1712,4 +1712,46 @@ theorem coreProgress_evalArgs
     NotStuckArgs (evalFuelArgs n ft env s jt lt nl es) :=
   (coreProgress n).2 htype hargs ctx
 
+/-! ## Initial-state ProgressCtx construction
+
+Most `ProgressCtx` invariants are trivially satisfied for the empty
+initial state (`Env.empty`, `JoinTable.empty`, `LoopTable.empty`).
+`initialProgressCtx` constructs a `ProgressCtx` for this case, given
+only the hypotheses that depend on the function table. -/
+
+theorem initialProgressCtx
+    (F : FnTyTable) (ft : FnTable)
+    (hft : FnTableWellTyped ft F)
+    (hftc : FnTableComplete ft F)
+    (hhft : HeapFieldTyped F) :
+    ProgressCtx TyEnv.empty JoinTyEnv.empty LoopTyEnv.empty F
+      ft Env.empty JoinTable.empty LoopTable.empty where
+  envWT := fun _ _ h => by simp [TyEnv.empty] at h
+  ftWT := hft
+  clInv := fun _ _ _ h _ => by simp [Env.empty] at h
+  fnDisj :=
+    ⟨fun _ _ _ _ h => by simp [Env.empty] at h,
+     fun _ _ _ h => by simp [Env.empty] at h⟩
+  ftC := hftc
+  jwt := JoinWellTyped.empty
+  jdc := JoinDeltaConsistent.empty_empty
+  llc := LoopLabelConsistent.empty
+  hft := hhft
+
+/-! ## Top-level progress (the user-facing theorem)
+
+For a top-level `CoreExpr` expression typed in the empty context,
+`evalFuel` starting from the initial state never gets stuck. -/
+
+theorem top_level_progress
+    {F : FnTyTable} {ft : FnTable} {e : Expr} {τ : Mtype}
+    (hft : FnTableWellTyped ft F)
+    (hftc : FnTableComplete ft F)
+    (hhft : HeapFieldTyped F)
+    (htype : HasType TyEnv.empty JoinTyEnv.empty LoopTyEnv.empty F none e τ)
+    (hcore : CoreExpr e) (n : Nat) :
+    NotStuck (evalFuel n ft Env.empty Store.empty JoinTable.empty
+              LoopTable.empty 0 e) :=
+  coreProgress_eval htype hcore (initialProgressCtx F ft hft hftc hhft)
+
 end Moonbit.Mcore
