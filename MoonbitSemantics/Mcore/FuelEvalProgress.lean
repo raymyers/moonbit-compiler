@@ -126,6 +126,31 @@ def NotStuck : EvalFuelResult → Prop
 @[simp] theorem NotStuck.outOfFuel : NotStuck .outOfFuel := trivial
 @[simp] theorem NotStuck.stuck (msg : String) : ¬ NotStuck (.stuck msg) := id
 
+/-! ## ProgressCtx: bundled hypothesis set
+
+Most progress lemmas for non-leaf cases share the same hypothesis bundle
+inherited from preservation. `ProgressCtx` packages these into a single
+structure so they can be threaded through recursive calls compactly.
+
+Note that this context is **store-independent** — it doesn't carry
+`StoreWellTyped` or `HeapAvail`. Progress for heap-touching operations
+(`.field` on `.constr`/`.loc`, `.recordUpdate`, `.mutate`) additionally
+needs a store-typing invariant linked to the runtime store, which the
+current formalization handles as an existential in `ValueHasType.locConstr`
+and a `HeapFieldTyped` conditional hypothesis (see memory/preservation). -/
+
+structure ProgressCtx (Γ : TyEnv) (Δ : JoinTyEnv) (Λ : LoopTyEnv) (F : FnTyTable)
+    (ft : FnTable) (env : Env) (jt : JoinTable) (lt : LoopTable) where
+  envWT : EnvWellTyped env Γ
+  ftWT : FnTableWellTyped ft F
+  clInv : ClosureInvariant env Γ F
+  fnDisj : FnEnvDisjoint env F
+  ftC : FnTableComplete ft F
+  jwt : JoinWellTyped jt Δ Γ Λ F
+  jdc : JoinDeltaConsistent jt Δ
+  llc : LoopLabelConsistent lt Λ
+  hft : HeapFieldTyped F
+
 /-! ## Leaf-case progress lemmas
 
 These are progress lemmas for the constructors of `Expr` that don't
