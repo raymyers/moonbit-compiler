@@ -1759,4 +1759,50 @@ theorem top_level_progress
               LoopTable.empty 0 e) :=
   coreProgress_eval htype hcore (initialProgressCtx F ft hft hftc hhft)
 
+/-! ## Type Soundness — the meta-theorem
+
+The capstone result combining all three pillars (preservation, soundness
+of the fuel-bounded evaluator, and progress) into a single statement:
+for any well-typed stub-free `CoreExpr` program, fuel-bounded evaluation
+either yields a well-typed outcome or runs out of fuel — never a stuck
+type error.
+
+This is the classical "type safety modulo divergence" property for the
+Mcore fragment covered by `CoreExpr`. -/
+
+theorem type_soundness
+    {F : FnTyTable} {ft : FnTable} {e : Expr} {τ : Mtype}
+    (hft : FnTableWellTyped ft F)
+    (hftc : FnTableComplete ft F)
+    (hhft : HeapFieldTyped F)
+    (htype : HasType TyEnv.empty JoinTyEnv.empty LoopTyEnv.empty F none e τ)
+    (hcore : CoreExpr e) (n : Nat) :
+    (∃ o s' nl',
+      evalFuel n ft Env.empty Store.empty JoinTable.empty LoopTable.empty 0 e =
+        .ok o s' nl' ∧
+      OutcomeHasType o τ LoopTyEnv.empty F) ∨
+    evalFuel n ft Env.empty Store.empty JoinTable.empty LoopTable.empty 0 e =
+      .outOfFuel := by
+  have hprog := top_level_progress hft hftc hhft htype hcore n
+  cases hr : evalFuel n ft Env.empty Store.empty JoinTable.empty
+              LoopTable.empty 0 e with
+  | outOfFuel => right; rfl
+  | stuck msg => rw [hr] at hprog; exact absurd hprog id
+  | ok o s' nl' =>
+    left
+    refine ⟨o, s', nl', rfl, ?_⟩
+    -- Use soundness to get Eval, then preservation to type o
+    have heval := evalFuel_sound hr
+    exact (preservation htype heval
+      (fun _ _ h => by simp [TyEnv.empty] at h)  -- envWT
+      hft
+      (fun _ _ _ h _ => by simp [Env.empty] at h)  -- clInv
+      ⟨fun _ _ _ _ h => by simp [Env.empty] at h,
+       fun _ _ _ h => by simp [Env.empty] at h⟩  -- fnDisj
+      hftc
+      JoinWellTyped.empty
+      JoinDeltaConsistent.empty_empty
+      LoopLabelConsistent.empty
+      hhft).hasType
+
 end Moonbit.Mcore
