@@ -628,6 +628,63 @@ theorem progress_and
       | false => simp [NotStuck]
     | _ => simp [NotStuck]
 
+theorem progress_handleError_joinapply
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype} {τ errTy : Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {obj : Expr} {target : Var}
+    (htype_obj : HasType Γ Δ Λ F (some errTy) obj τ)
+    (hΔ : Δ target = some ⟨[errTy], τ⟩)
+    (hjparams_env_fresh : ∀ jparams jbody, jt target = some ⟨jparams, jbody⟩ →
+      ∀ p, p ∈ jparams → env p.binder = none)
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
+    (hhft : HeapFieldTyped F)
+    (ih_obj : NotStuck (evalFuel n ft env s jt lt nl obj))
+    (ih_body : ∀ jparams jbody s' nl' v,
+      jt target = some ⟨jparams, jbody⟩ →
+      jparams.length = 1 →
+      NotStuck (evalFuel n ft (Env.bindParams env jparams [v]) s' jt lt nl' jbody)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl
+      (.handleError obj (.joinapply target))) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl obj with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih_obj; exact absurd ih_obj id
+  | ok o s' nl' =>
+    cases o with
+    | val v => simp [NotStuck]
+    | error v =>
+      -- Get jt target from JoinDeltaConsistent
+      obtain ⟨jparams, jbody, hjt_target⟩ := hjdc target ⟨[errTy], τ⟩ hΔ
+      simp only [hjt_target]
+      -- jparams fresh
+      have hfresh_env := hjparams_env_fresh jparams jbody hjt_target
+      have hfresh_not_any : ¬ ((jparams.any fun p => (env p.binder).isSome) = true) := by
+        simp only [List.any_eq_true, not_exists]
+        intro p ⟨hp, hsome⟩
+        rw [hfresh_env p hp] at hsome
+        exact absurd hsome (by simp)
+      simp only [if_neg hfresh_not_any]
+      -- jparams.length = 1
+      obtain ⟨hjp_map, _, _⟩ := hjwt.extract hjt_target hΔ
+      have hjparams_len : jparams.length = 1 := by
+        have : jparams.map (·.ty) = [errTy] := hjp_map
+        have := congrArg List.length this
+        simp at this; exact this
+      have := ih_body jparams jbody s' nl' v hjt_target hjparams_len
+      cases hb : evalFuel n ft (Env.bindParams env jparams [v]) s' jt lt nl' jbody with
+      | outOfFuel => simp [NotStuck, hb]
+      | stuck msg => rw [hb] at this; exact absurd this id
+      | ok o₂ s₂ nl₂ => simp [NotStuck, hb]
+    | _ => simp [NotStuck]
+
 theorem progress_apply_closure
     {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
     {E : Option Mtype} {paramTys : List Mtype} {retTy : Mtype}
