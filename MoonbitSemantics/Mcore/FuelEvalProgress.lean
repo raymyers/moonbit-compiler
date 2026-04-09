@@ -628,6 +628,211 @@ theorem progress_and
       | false => simp [NotStuck]
     | _ => simp [NotStuck]
 
+/-- A type whose values are always `.const c` for some `c`. These are the
+    scalar types that are represented as `Value.const`. -/
+def IsConstType : Mtype → Prop
+  | .bool => True
+  | .int => True
+  | .int64 => True
+  | .string => True
+  | .char => True
+  | .byte => True
+  | .float => True
+  | .double => True
+  | _ => False
+
+/-- If `v` has a const type, it's a `.const c` value. -/
+theorem canonical_const {v : Value} {τ : Mtype}
+    (hct : IsConstType τ) (h : ValueHasType v τ) :
+    ∃ c, v = .const c := by
+  match τ, hct, h with
+  | .bool, _, h => obtain ⟨b, rfl⟩ := canonical_bool h; exact ⟨_, rfl⟩
+  | .int, _, h => obtain ⟨n, rfl⟩ := canonical_int h; exact ⟨_, rfl⟩
+  | .int64, _, h => obtain ⟨n, rfl⟩ := canonical_int64 h; exact ⟨_, rfl⟩
+  | .string, _, h => obtain ⟨s, rfl⟩ := canonical_string h; exact ⟨_, rfl⟩
+  | .char, _, h => obtain ⟨c, rfl⟩ := canonical_char h; exact ⟨_, rfl⟩
+  | .byte, _, h => obtain ⟨b, rfl⟩ := canonical_byte h; exact ⟨_, rfl⟩
+  | .float, _, h => obtain ⟨f, rfl⟩ := canonical_float h; exact ⟨_, rfl⟩
+  | .double, _, h => obtain ⟨d, rfl⟩ := canonical_double h; exact ⟨_, rfl⟩
+
+/-- Progress for `.switchConstr obj cases (some d)` — i.e. with a default
+    branch — when `obj` has a `.constr tid ats` type AND the runtime value
+    is a `.constr tag args`. The `.loc` subcase is not supported by
+    evalFuel's switchConstr implementation; the no-default case is a
+    latent soundness gap (switchConstr with a missing default and no
+    matching tag is runtime-stuck but accepted by the typing). -/
+theorem progress_switchConstr_withDefault
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype} {tid : Nat} {ats : List Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {obj : Expr} {d : Expr}
+    {cases_ : List (ConstrTag × Option Var × Expr)}
+    (htype_obj : HasType Γ Δ Λ F E obj (.constr tid ats))
+    (hnot_loc : ∀ o s' nl',
+      evalFuel n ft env s jt lt nl obj = .ok o s' nl' →
+      ∀ l, o ≠ .val (.loc l))
+    (hbinder_fresh : ∀ tag branch x,
+      findConstrCase cases_ tag = some (some x, branch) → env x = none)
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
+    (hhft : HeapFieldTyped F)
+    (ih_obj : NotStuck (evalFuel n ft env s jt lt nl obj))
+    (ih_branch : ∀ tag binder branch tag' args s' nl',
+      findConstrCase cases_ tag = some (binder, branch) →
+      NotStuck (evalFuel n ft
+        (match binder with
+          | some x => Env.extend env x (.constr tag' args)
+          | none => env)
+        s' jt lt nl' branch))
+    (ih_dflt : ∀ s' nl', NotStuck (evalFuel n ft env s' jt lt nl' d)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl
+      (.switchConstr obj cases_ (some d))) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl obj with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih_obj; exact absurd ih_obj id
+  | ok o s' nl' =>
+    cases o with
+    | val v =>
+      have heval := evalFuel_sound hr
+      have hvt := preservation_val htype_obj heval
+        henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+      rcases canonical_constr hvt with
+        ⟨tag, args, rfl, hargs⟩ | ⟨l, rfl⟩
+      · -- .constr case
+        cases hfc : findConstrCase cases_ tag with
+        | none =>
+          have := ih_dflt s' nl'
+          cases hb : evalFuel n ft env s' jt lt nl' d with
+          | outOfFuel => simp [NotStuck, hfc, hb]
+          | stuck msg => rw [hb] at this; exact absurd this id
+          | ok o₂ s₂ nl₂ => simp [NotStuck, hfc, hb]
+        | some entry =>
+          obtain ⟨binder, branch⟩ := entry
+          cases binder with
+          | some x =>
+            have hxfresh : env x = none :=
+              hbinder_fresh tag branch x hfc
+            have := ih_branch tag (some x) branch tag args s' nl' hfc
+            simp only at this
+            cases hb : evalFuel n ft (Env.extend env x (.constr tag args))
+                        s' jt lt nl' branch with
+            | outOfFuel => simp [NotStuck, hfc, hxfresh, hb]
+            | stuck msg => rw [hb] at this; exact absurd this id
+            | ok o₂ s₂ nl₂ => simp [NotStuck, hfc, hxfresh, hb]
+          | none =>
+            have := ih_branch tag none branch tag args s' nl' hfc
+            simp only at this
+            cases hb : evalFuel n ft env s' jt lt nl' branch with
+            | outOfFuel => simp [NotStuck, hfc, hb]
+            | stuck msg => rw [hb] at this; exact absurd this id
+            | ok o₂ s₂ nl₂ => simp [NotStuck, hfc, hb]
+      · exact absurd rfl (hnot_loc _ _ _ hr l)
+    | _ => simp [NotStuck]
+
+theorem progress_field_heap_constrValue
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype} {τ fieldTy : Mtype} {tid : Nat} {ats : List Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {rec_ : Expr} {acc : Accessor} {pos : Nat}
+    (htype_rec : HasType Γ Δ Λ F E rec_ (.constr tid ats))
+    (hpos : ats[pos]? = some fieldTy)
+    (hnot_loc : ∀ o s' nl',
+      evalFuel n ft env s jt lt nl rec_ = .ok o s' nl' →
+      ∀ l, o ≠ .val (.loc l))
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
+    (hhft : HeapFieldTyped F)
+    (ih : NotStuck (evalFuel n ft env s jt lt nl rec_)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.field rec_ acc pos)) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl rec_ with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih; exact absurd ih id
+  | ok o s' nl' =>
+    cases o with
+    | val v =>
+      have heval := evalFuel_sound hr
+      have hvt := preservation_val htype_rec heval
+        henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+      rcases canonical_constr hvt with
+        ⟨tag, args, rfl, hargs⟩ | ⟨l, rfl⟩
+      · -- .constr case — handle bounds
+        have hlen_args : pos < args.length := by
+          have hlen_ats : pos < ats.length := by
+            by_contra hlt; push_neg at hlt
+            simp [List.getElem?_eq_none_iff.mpr (by omega)] at hpos
+          rw [hargs.length_eq]; exact hlen_ats
+        have hgetv : args[pos]? = some (args[pos]'hlen_args) := by
+          simp [List.getElem?_eq_getElem hlen_args]
+        simp [hgetv, NotStuck]
+      · -- .loc case — ruled out by hnot_loc
+        exact absurd rfl (hnot_loc _ _ _ hr l)
+    | _ => simp [NotStuck]
+
+theorem progress_switchConstant
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype} {objTy : Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {obj : Expr}
+    {cases_ : List (Moonbit.Clam.Const × Expr)} {dflt : Expr}
+    (htype_obj : HasType Γ Δ Λ F E obj objTy)
+    (hct : IsConstType objTy)
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
+    (hhft : HeapFieldTyped F)
+    (ih_obj : NotStuck (evalFuel n ft env s jt lt nl obj))
+    (ih_branches : ∀ i (hi : i < cases_.length) s' nl',
+      NotStuck (evalFuel n ft env s' jt lt nl' (cases_[i]'hi).2))
+    (ih_dflt : ∀ s' nl', NotStuck (evalFuel n ft env s' jt lt nl' dflt)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl
+      (.switchConstant obj cases_ dflt)) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl obj with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih_obj; exact absurd ih_obj id
+  | ok o s' nl' =>
+    cases o with
+    | val v =>
+      have heval := evalFuel_sound hr
+      have hvt := preservation_val htype_obj heval
+        henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+      obtain ⟨c, rfl⟩ := canonical_const hct hvt
+      cases hfc : findConstantCase cases_ c with
+      | none =>
+        have := ih_dflt s' nl'
+        cases hb : evalFuel n ft env s' jt lt nl' dflt with
+        | outOfFuel => simp [NotStuck, hfc, hb]
+        | stuck msg => rw [hb] at this; exact absurd this id
+        | ok o₂ s₂ nl₂ => simp [NotStuck, hfc, hb]
+      | some branch =>
+        obtain ⟨i, hi, heq⟩ := findConstantCase_index cases_ c branch hfc
+        have := ih_branches i hi s' nl'
+        rw [heq] at this
+        cases hb : evalFuel n ft env s' jt lt nl' branch with
+        | outOfFuel => simp [NotStuck, hfc, hb]
+        | stuck msg => rw [hb] at this; exact absurd this id
+        | ok o₂ s₂ nl₂ => simp [NotStuck, hfc, hb]
+    | _ => simp [NotStuck]
+
 theorem progress_handleError_joinapply
     {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
     {E : Option Mtype} {τ errTy : Mtype}
