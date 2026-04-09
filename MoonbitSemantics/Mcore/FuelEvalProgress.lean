@@ -1446,4 +1446,43 @@ theorem progress_args_cons
       | okVals vs sR nlR => simp only [hrs]; simp [NotStuckArgs]
     | _ => simp [NotStuckArgs]
 
+/-! ## Minimal combined progress theorem
+
+A demonstration that the per-case lemmas compose via mutual induction
+on fuel. This handles a minimal subset of stub-free expressions:
+constants, variables, functions, plus the `.break none` leaf.
+
+For this tiny scope, no preservation hypotheses are needed — the
+lemmas are all runtime-only (EnvWellTyped for `.var`, nothing else).
+
+The full combined theorem would follow the same structure but thread
+the complete `ProgressCtx` + conditional hypotheses through. -/
+
+/-- Minimal "pure leaf" scope predicate. -/
+inductive LeafExpr : Expr → Prop where
+  | const : LeafExpr (.const c)
+  | unit : LeafExpr .unit
+  | var : LeafExpr (.var x prim)
+  | function : LeafExpr (.function params fnBody isRaw)
+  | breakNone : LeafExpr (.break none label)
+
+theorem progress_leaf
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype} {τ : Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {e : Expr}
+    (hleaf : LeafExpr e)
+    (htype : HasType Γ Δ Λ F E e τ)
+    (henv : EnvWellTyped env Γ) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl e) := by
+  cases hleaf with
+  | const => exact progress_const _ _ _ _ _ _ _ _
+  | unit => exact progress_unit _ _ _ _ _ _ _
+  | var =>
+    cases htype with
+    | var hΓ => exact progress_var hΓ henv _ _ _ _ _ _ _
+    | varPrim hΓ => exact progress_var hΓ henv _ _ _ _ _ _ _
+  | function => exact progress_function _ _ _ _ _ _ _ _ _ _
+  | breakNone => exact progress_breakNone _ _ _ _ _ _ _ _
+
 end Moonbit.Mcore
