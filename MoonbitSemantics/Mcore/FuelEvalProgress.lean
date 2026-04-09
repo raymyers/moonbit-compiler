@@ -628,6 +628,79 @@ theorem progress_and
       | false => simp [NotStuck]
     | _ => simp [NotStuck]
 
+theorem progress_field_tuple
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype} {τ : Mtype} {τs : List Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {rec_ : Expr} {acc : Accessor} {pos : Nat}
+    (htype_rec : HasType Γ Δ Λ F E rec_ (.tuple τs))
+    (hpos : τs[pos]? = some τ)
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
+    (hhft : HeapFieldTyped F)
+    (ih : NotStuck (evalFuel n ft env s jt lt nl rec_)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.field rec_ acc pos)) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl rec_ with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih; exact absurd ih id
+  | ok o s' nl' =>
+    cases o with
+    | val v =>
+      have heval := evalFuel_sound hr
+      have hvt := preservation_val htype_rec heval
+        henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+      obtain ⟨vals, rfl, hvals⟩ := canonical_tuple hvt
+      have hlen_vals : pos < vals.length := by
+        have hlen_τs : pos < τs.length := by
+          by_contra hlt; push_neg at hlt
+          simp [List.getElem?_eq_none_iff.mpr (by omega)] at hpos
+        rw [hvals.length_eq]; exact hlen_τs
+      have hgetv : vals[pos]? = some (vals[pos]'hlen_vals) := by
+        simp [List.getElem?_eq_getElem hlen_vals]
+      simp [hgetv, NotStuck]
+    | _ => simp [NotStuck]
+
+theorem progress_prim
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {op : Prim} {argExprs : List Expr}
+    {argTys : List Mtype}
+    (htype_args : HasTypeArgs Γ Δ Λ F E argExprs argTys)
+    (hsupport : PrimSupported op argTys)
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
+    (hhft : HeapFieldTyped F)
+    (ih_args : NotStuckArgs (evalFuelArgs n ft env s jt lt nl argExprs)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.prim op argExprs)) := by
+  simp only [evalFuel]
+  cases hr : evalFuelArgs n ft env s jt lt nl argExprs with
+  | outOfFuelArgs => simp [NotStuck]
+  | stuckArgs msg => rw [hr] at ih_args; exact absurd ih_args id
+  | abortArgs o s' nl' => simp [NotStuck]
+  | okVals argVals s' nl' =>
+    simp only [hr]
+    -- Get typing of argVals via soundness + preservationArgs
+    have hevalArgs := evalFuelArgs_sound_ok hr
+    have hapres := preservationArgs htype_args hevalArgs
+      henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+    -- Use evalPrim_total
+    obtain ⟨v, hv⟩ := evalPrim_total hsupport hapres.hasTypes
+    simp [hv, NotStuck]
+
 theorem progress_or
     {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
     {E : Option Mtype}
