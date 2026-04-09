@@ -398,6 +398,82 @@ theorem progress_array
   | abortArgs o s' nl' => simp [NotStuck]
   | okVals vs s' nl' => simp [NotStuck]
 
+/-! ## Cases with freshness hypotheses
+
+These progress lemmas need an additional `env name = none` (or `jt name = none`)
+invariant corresponding to the Eval rule's side condition. -/
+
+theorem progress_let
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {name : Var} {rhs body : Expr}
+    (hfresh : env name = none)
+    (ih_rhs : NotStuck (evalFuel n ft env s jt lt nl rhs))
+    (ih_body : ∀ v s' nl',
+      NotStuck (evalFuel n ft (Env.extend env name v) s' jt lt nl' body)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.let name rhs body)) := by
+  simp only [evalFuel, hfresh]
+  cases hr : evalFuel n ft env s jt lt nl rhs with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih_rhs; exact absurd ih_rhs id
+  | ok o s' nl' =>
+    cases o with
+    | val v =>
+      have := ih_body v s' nl'
+      cases hb : evalFuel n ft (Env.extend env name v) s' jt lt nl' body with
+      | outOfFuel => simp [NotStuck, hb]
+      | stuck msg => rw [hb] at this; exact absurd this id
+      | ok o₂ s₂ nl₂ => simp [NotStuck, hb]
+    | _ => simp [NotStuck]
+
+theorem progress_letfnNonrec
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {name : Var} {params : List Param}
+    {fnBody body : Expr}
+    (hfresh : env name = none)
+    (ih_body : ∀ v s' nl',
+      NotStuck (evalFuel n ft (Env.extend env name v) s' jt lt nl' body)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl
+      (.letfn name params fnBody body .nonRecursive)) := by
+  simp only [evalFuel, hfresh]
+  have := ih_body (.closure env params fnBody) s nl
+  cases hb : evalFuel n ft (Env.extend env name (.closure env params fnBody))
+              s jt lt nl body with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hb] at this; exact absurd this id
+  | ok o s' nl' => simp [NotStuck]
+
+theorem progress_letfnTailJoin
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {name : Var} {params : List Param}
+    {fnBody body : Expr}
+    (hfresh : jt name = none)
+    (ih_body : NotStuck (evalFuel n ft env s
+      (JoinTable.extend jt name ⟨params, fnBody⟩) lt nl body)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl
+      (.letfn name params fnBody body .tailJoin)) := by
+  simp only [evalFuel, hfresh]
+  cases hb : evalFuel n ft env s
+              (JoinTable.extend jt name ⟨params, fnBody⟩) lt nl body with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hb] at ih_body; exact absurd ih_body id
+  | ok o s' nl' => simp [NotStuck]
+
+theorem progress_letfnNontailJoin
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {name : Var} {params : List Param}
+    {fnBody body : Expr}
+    (hfresh : jt name = none)
+    (ih_body : NotStuck (evalFuel n ft env s
+      (JoinTable.extend jt name ⟨params, fnBody⟩) lt nl body)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl
+      (.letfn name params fnBody body .nontailJoin)) := by
+  simp only [evalFuel, hfresh]
+  cases hb : evalFuel n ft env s
+              (JoinTable.extend jt name ⟨params, fnBody⟩) lt nl body with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hb] at ih_body; exact absurd ih_body id
+  | ok o s' nl' => simp [NotStuck]
+
 theorem progress_seq
     {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
     {lt : LoopTable} {nl : Loc} {exprs : List Expr} {last : Expr}
@@ -454,6 +530,142 @@ theorem progress_handleError_returnErr
   | outOfFuel => simp [NotStuck]
   | stuck msg => rw [hr] at ih; exact absurd ih id
   | ok o s' nl' => cases o <;> simp [NotStuck]
+
+/-! ## Cases using preservation for canonical forms
+
+For cases like `.if`, `.and`, `.or`, `.switchConstant .bool`, we need
+to know that intermediate results have specific shapes. We use the
+chain: `evalFuel n e = .ok → Eval ... e → ValueHasType → canonical forms`
+to rule out the impossible `.stuck` arms. -/
+
+theorem progress_if
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype} {τ : Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc}
+    {condE ifso : Expr} {ifnot : Option Expr}
+    (htype_cond : HasType Γ Δ Λ F E condE .bool)
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
+    (hhft : HeapFieldTyped F)
+    (ih_cond : NotStuck (evalFuel n ft env s jt lt nl condE))
+    (ih_ifso : ∀ s' nl', NotStuck (evalFuel n ft env s' jt lt nl' ifso))
+    (ih_ifnot : ∀ e, ifnot = some e →
+      ∀ s' nl', NotStuck (evalFuel n ft env s' jt lt nl' e)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.if condE ifso ifnot)) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl condE with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih_cond; exact absurd ih_cond id
+  | ok o s' nl' =>
+    cases o with
+    | val v =>
+      -- Use soundness to get Eval, then preservation to get typing
+      have heval := evalFuel_sound hr
+      have hvt := preservation_val htype_cond heval
+        henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+      obtain ⟨b, rfl⟩ := canonical_bool hvt
+      cases b with
+      | true =>
+        have := ih_ifso s' nl'
+        cases hb : evalFuel n ft env s' jt lt nl' ifso with
+        | outOfFuel => simp [NotStuck, hb]
+        | stuck msg => rw [hb] at this; exact absurd this id
+        | ok o₂ s₂ nl₂ => simp [NotStuck, hb]
+      | false =>
+        cases ifnot with
+        | none => simp [NotStuck]
+        | some e' =>
+          have := ih_ifnot e' rfl s' nl'
+          cases hb : evalFuel n ft env s' jt lt nl' e' with
+          | outOfFuel => simp [NotStuck, hb]
+          | stuck msg => rw [hb] at this; exact absurd this id
+          | ok o₂ s₂ nl₂ => simp [NotStuck, hb]
+    | _ => simp [NotStuck]
+
+theorem progress_and
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {lhs rhs : Expr}
+    (htype_lhs : HasType Γ Δ Λ F E lhs .bool)
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
+    (hhft : HeapFieldTyped F)
+    (ih_lhs : NotStuck (evalFuel n ft env s jt lt nl lhs))
+    (ih_rhs : ∀ s' nl', NotStuck (evalFuel n ft env s' jt lt nl' rhs)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.and lhs rhs)) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl lhs with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih_lhs; exact absurd ih_lhs id
+  | ok o s' nl' =>
+    cases o with
+    | val v =>
+      have heval := evalFuel_sound hr
+      have hvt := preservation_val htype_lhs heval
+        henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+      obtain ⟨b, rfl⟩ := canonical_bool hvt
+      cases b with
+      | true =>
+        have := ih_rhs s' nl'
+        cases hb : evalFuel n ft env s' jt lt nl' rhs with
+        | outOfFuel => simp [NotStuck, hb]
+        | stuck msg => rw [hb] at this; exact absurd this id
+        | ok o₂ s₂ nl₂ => simp [NotStuck, hb]
+      | false => simp [NotStuck]
+    | _ => simp [NotStuck]
+
+theorem progress_or
+    {Γ : TyEnv} {Δ : JoinTyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    {E : Option Mtype}
+    {n : Nat} {ft : FnTable} {env : Env} {s : Store} {jt : JoinTable}
+    {lt : LoopTable} {nl : Loc} {lhs rhs : Expr}
+    (htype_lhs : HasType Γ Δ Λ F E lhs .bool)
+    (henv : EnvWellTyped env Γ)
+    (hft : FnTableWellTyped ft F)
+    (hcinv : ClosureInvariant env Γ F)
+    (hdisj : FnEnvDisjoint env F)
+    (hftc : FnTableComplete ft F)
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hjdc : JoinDeltaConsistent jt Δ)
+    (hllc : LoopLabelConsistent lt Λ)
+    (hhft : HeapFieldTyped F)
+    (ih_lhs : NotStuck (evalFuel n ft env s jt lt nl lhs))
+    (ih_rhs : ∀ s' nl', NotStuck (evalFuel n ft env s' jt lt nl' rhs)) :
+    NotStuck (evalFuel (n+1) ft env s jt lt nl (.or lhs rhs)) := by
+  simp only [evalFuel]
+  cases hr : evalFuel n ft env s jt lt nl lhs with
+  | outOfFuel => simp [NotStuck]
+  | stuck msg => rw [hr] at ih_lhs; exact absurd ih_lhs id
+  | ok o s' nl' =>
+    cases o with
+    | val v =>
+      have heval := evalFuel_sound hr
+      have hvt := preservation_val htype_lhs heval
+        henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+      obtain ⟨b, rfl⟩ := canonical_bool hvt
+      cases b with
+      | true => simp [NotStuck]
+      | false =>
+        have := ih_rhs s' nl'
+        cases hb : evalFuel n ft env s' jt lt nl' rhs with
+        | outOfFuel => simp [NotStuck, hb]
+        | stuck msg => rw [hb] at this; exact absurd this id
+        | ok o₂ s₂ nl₂ => simp [NotStuck, hb]
+    | _ => simp [NotStuck]
 
 /-! ## Progress for `evalFuelArgs` base case -/
 
