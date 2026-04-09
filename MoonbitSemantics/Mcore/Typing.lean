@@ -103,6 +103,20 @@ def LoopTyEnv.extend (Λ : LoopTyEnv) (l : LoopLabel) (e : LoopTyEntry) : LoopTy
 /-- Function type table: maps function vars to their parameter and return types. -/
 abbrev FnTyTable := Var → Option (List Mtype × Mtype)
 
+/-- A type whose values are always `.const c` for some `c`. These are the
+    scalar types that are represented as `Value.const`. Used to constrain
+    `.switchConstant`'s object type so switch cases are non-stuck. -/
+def IsConstType : Mtype → Prop
+  | .bool => True
+  | .int => True
+  | .int64 => True
+  | .string => True
+  | .char => True
+  | .byte => True
+  | .float => True
+  | .double => True
+  | _ => False
+
 /-! ## Typing judgment
 
 `HasType Γ Δ Λ F E e τ` means: in typing environment Γ, join env Δ,
@@ -326,6 +340,7 @@ inductive HasType :
 
   | switchConstant :
     HasType Γ Δ Λ F E obj objTy →
+    IsConstType objTy →
     (∀ i (h : i < cases.length),
       HasType Γ Δ Λ F E (cases[i]).2 τ) →
     HasType Γ Δ Λ F E dflt τ →

@@ -1194,7 +1194,7 @@ def preservation
   | .switchConstrAbort heval_obj hab => match htype with
     | .switchConstr htype_obj _ _ => (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc hhft).weaken hab
   | .switchConstantAbort heval_obj hab => match htype with
-    | .switchConstant htype_obj _ _ => (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc hhft).weaken hab
+    | .switchConstant htype_obj _ _ _ => (preservation htype_obj heval_obj henv hft hcinv hdisj hftc hjwt hjdc hllc hhft).weaken hab
   | .returnAbort heval_e hab => match htype with
     | .returnSingle htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc hllc hhft).weaken hab
     | .returnOk htype_e => (preservation htype_e heval_e henv hft hcinv hdisj hftc hjwt hjdc hllc hhft).weaken hab
@@ -1440,12 +1440,12 @@ def preservation
     | .switchConstr _ _ htype_dflt =>
       preservation (htype_dflt _ rfl) heval_dflt henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
   | .switchConstantMatch heval_obj hfindcase heval_branch => match htype with
-    | .switchConstant _ htype_cases _ =>
+    | .switchConstant _ _ htype_cases _ =>
       let ⟨i, hi, hbranch_eq⟩ := findConstantCase_index _ _ _ hfindcase
       let htype_branch := htype_cases i hi
       preservation (hbranch_eq ▸ htype_branch) heval_branch henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
   | .switchConstantDefault _ _ heval_dflt => match htype with
-    | .switchConstant _ _ htype_dflt => preservation htype_dflt heval_dflt henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+    | .switchConstant _ _ _ htype_dflt => preservation htype_dflt heval_dflt henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
 
   -- ════════ Prim ════════
   | .prim heval_args hprim => match htype with

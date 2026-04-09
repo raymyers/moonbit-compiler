@@ -670,32 +670,38 @@ theorem progress_and
       | false => simp [NotStuck]
     | _ => simp [NotStuck]
 
-/-- A type whose values are always `.const c` for some `c`. These are the
-    scalar types that are represented as `Value.const`. -/
-def IsConstType : Mtype → Prop
-  | .bool => True
-  | .int => True
-  | .int64 => True
-  | .string => True
-  | .char => True
-  | .byte => True
-  | .float => True
-  | .double => True
-  | _ => False
+-- IsConstType is now defined in Typing.lean so HasType.switchConstant
+-- can carry it. canonical_const is its companion canonical-forms lemma.
 
 /-- If `v` has a const type, it's a `.const c` value. -/
 theorem canonical_const {v : Value} {τ : Mtype}
     (hct : IsConstType τ) (h : ValueHasType v τ) :
     ∃ c, v = .const c := by
-  match τ, hct, h with
-  | .bool, _, h => obtain ⟨b, rfl⟩ := canonical_bool h; exact ⟨_, rfl⟩
-  | .int, _, h => obtain ⟨n, rfl⟩ := canonical_int h; exact ⟨_, rfl⟩
-  | .int64, _, h => obtain ⟨n, rfl⟩ := canonical_int64 h; exact ⟨_, rfl⟩
-  | .string, _, h => obtain ⟨s, rfl⟩ := canonical_string h; exact ⟨_, rfl⟩
-  | .char, _, h => obtain ⟨c, rfl⟩ := canonical_char h; exact ⟨_, rfl⟩
-  | .byte, _, h => obtain ⟨b, rfl⟩ := canonical_byte h; exact ⟨_, rfl⟩
-  | .float, _, h => obtain ⟨f, rfl⟩ := canonical_float h; exact ⟨_, rfl⟩
-  | .double, _, h => obtain ⟨d, rfl⟩ := canonical_double h; exact ⟨_, rfl⟩
+  cases τ with
+  | int => obtain ⟨n, rfl⟩ := canonical_int h; exact ⟨_, rfl⟩
+  | char => obtain ⟨c, rfl⟩ := canonical_char h; exact ⟨_, rfl⟩
+  | bool => obtain ⟨b, rfl⟩ := canonical_bool h; exact ⟨_, rfl⟩
+  | unit => simp only [IsConstType] at hct
+  | byte => obtain ⟨b, rfl⟩ := canonical_byte h; exact ⟨_, rfl⟩
+  | int16 => simp only [IsConstType] at hct
+  | uint16 => simp only [IsConstType] at hct
+  | int64 => obtain ⟨n, rfl⟩ := canonical_int64 h; exact ⟨_, rfl⟩
+  | uint => simp only [IsConstType] at hct
+  | uint64 => simp only [IsConstType] at hct
+  | float => obtain ⟨f, rfl⟩ := canonical_float h; exact ⟨_, rfl⟩
+  | double => obtain ⟨d, rfl⟩ := canonical_double h; exact ⟨_, rfl⟩
+  | string => obtain ⟨s, rfl⟩ := canonical_string h; exact ⟨_, rfl⟩
+  | bytes => simp only [IsConstType] at hct
+  | optimizedOption _ => simp only [IsConstType] at hct
+  | func _ _ => simp only [IsConstType] at hct
+  | rawFunc _ _ => simp only [IsConstType] at hct
+  | tuple _ => simp only [IsConstType] at hct
+  | fixedarray _ => simp only [IsConstType] at hct
+  | constr _ _ => simp only [IsConstType] at hct
+  | trait _ => simp only [IsConstType] at hct
+  | any _ => simp only [IsConstType] at hct
+  | maybeUninit _ => simp only [IsConstType] at hct
+  | errorValueResult _ _ _ => simp only [IsConstType] at hct
 
 /-- Progress for `.switchConstr obj cases (some d)` — i.e. with a default
     branch — when `obj` has a `.constr tid ats` type AND the runtime value
@@ -1534,6 +1540,9 @@ inductive CoreExpr : Expr → Prop where
   | and_ : CoreExpr lhs → CoreExpr rhs → CoreExpr (.and lhs rhs)
   | or_ : CoreExpr lhs → CoreExpr rhs → CoreExpr (.or lhs rhs)
   | prim : SafePrim op → CoreArgs argExprs → CoreExpr (.prim op argExprs)
+  | switchConstant : CoreExpr obj → CoreExpr dflt →
+      (∀ i (h : i < cases_.length), CoreExpr (cases_[i]'h).2) →
+      CoreExpr (.switchConstant obj cases_ dflt)
 
 inductive CoreArgs : List Expr → Prop where
   | nil : CoreArgs []
@@ -1653,6 +1662,15 @@ private theorem coreProgress_succ (n : Nat) (ih : CoreProgressAt n) :
         exact progress_prim htargs (hsafe.to_primSupported htypeOfPrim)
           ctx.envWT ctx.ftWT ctx.clInv ctx.fnDisj ctx.ftC ctx.jwt
           ctx.jdc ctx.llc ctx.hft (ihArgs htargs hargs ctx)
+    | switchConstant hobj hdflt hbranches =>
+      cases htype with
+      | switchConstant htobj hct htbranches htdflt =>
+        exact progress_switchConstant htobj hct
+          ctx.envWT ctx.ftWT ctx.clInv ctx.fnDisj ctx.ftC ctx.jwt
+          ctx.jdc ctx.llc ctx.hft
+          (ihE htobj hobj ctx)
+          (fun i hi s'' nl'' => ihE (htbranches i hi) (hbranches i hi) ctx)
+          (fun _ _ => ihE htdflt hdflt ctx)
   · intro Γ Δ Λ F E τs ft env s jt lt nl es htype hargs ctx
     cases hargs with
     | nil => exact progress_args_nil _ _ _ _ _ _ _

@@ -156,8 +156,8 @@ def HasType.strengthen
           · exact TyEnv.extend_mono hsub h
           · exact hsub _ _ h))
       (fun d hd => (hdflt d hd).strengthen hsub)
-  | .switchConstant hobj hbranches hd =>
-    .switchConstant (hobj.strengthen hsub) (fun i hi => (hbranches i hi).strengthen hsub) (hd.strengthen hsub)
+  | .switchConstant hobj hct hbranches hd =>
+    .switchConstant (hobj.strengthen hsub) hct (fun i hi => (hbranches i hi).strengthen hsub) (hd.strengthen hsub)
   | .loop hp hargs hbd =>
     .loop hp (hargs.strengthen hsub)
       (hbd.strengthen (TyEnv.bindParams_mono hsub _))
@@ -268,8 +268,8 @@ def HasType.strengthen_Δ
     .switchConstr (hobj.strengthen_Δ hsub)
       (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen_Δ hsub)
       (fun d hd => (hdflt d hd).strengthen_Δ hsub)
-  | .switchConstant hobj hbranches hd =>
-    .switchConstant (hobj.strengthen_Δ hsub) (fun i hi => (hbranches i hi).strengthen_Δ hsub) (hd.strengthen_Δ hsub)
+  | .switchConstant hobj hct hbranches hd =>
+    .switchConstant (hobj.strengthen_Δ hsub) hct (fun i hi => (hbranches i hi).strengthen_Δ hsub) (hd.strengthen_Δ hsub)
   | .loop hp hargs hbd => .loop hp (hargs.strengthen_Δ hsub) (hbd.strengthen_Δ hsub)
   | .break hΛ harg => .break hΛ (harg.strengthen_Δ hsub)
   | .breakNone hΛ => .breakNone hΛ
@@ -375,8 +375,8 @@ def HasType.strengthen_Λ
     .switchConstr (hobj.strengthen_Λ hsub)
       (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen_Λ hsub)
       (fun d hd => (hdflt d hd).strengthen_Λ hsub)
-  | .switchConstant hobj hbranches hd =>
-    .switchConstant (hobj.strengthen_Λ hsub) (fun i hi => (hbranches i hi).strengthen_Λ hsub) (hd.strengthen_Λ hsub)
+  | .switchConstant hobj hct hbranches hd =>
+    .switchConstant (hobj.strengthen_Λ hsub) hct (fun i hi => (hbranches i hi).strengthen_Λ hsub) (hd.strengthen_Λ hsub)
   | .loop hp hargs hbd =>
     .loop hp (hargs.strengthen_Λ hsub)
       (hbd.strengthen_Λ (LoopTyEnv.extend_mono hsub))
@@ -459,8 +459,8 @@ def HasType.strengthen_E_from_none_aux
     .switchConstr (hobj.strengthen_E_from_none_aux hE E')
       (fun tag binder branch hfind => (hcases tag binder branch hfind).strengthen_E_from_none_aux hE E')
       (fun d hd => (hdflt d hd).strengthen_E_from_none_aux hE E')
-  | .switchConstant hobj hbranches hd =>
-    .switchConstant (hobj.strengthen_E_from_none_aux hE E') (fun i hi => (hbranches i hi).strengthen_E_from_none_aux hE E') (hd.strengthen_E_from_none_aux hE E')
+  | .switchConstant hobj hct hbranches hd =>
+    .switchConstant (hobj.strengthen_E_from_none_aux hE E') hct (fun i hi => (hbranches i hi).strengthen_E_from_none_aux hE E') (hd.strengthen_E_from_none_aux hE E')
   | .loop hp hargs hbd => .loop hp (hargs.strengthen_E_from_none_aux hE E') (hbd.strengthen_E_from_none_aux hE E')
   | .break hΛ harg => .break hΛ (harg.strengthen_E_from_none_aux hE E')
   | .breakNone hΛ => .breakNone hΛ
