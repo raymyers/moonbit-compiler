@@ -55,6 +55,8 @@ inductive StubFree : Expr → Prop where
       StubFree (.letfn name params fnBody body .tailJoin)
   | letfnNontailJoin : StubFree fnBody → StubFree body →
       StubFree (.letfn name params fnBody body .nontailJoin)
+  | letfnRec : StubFree fnBody → StubFree body →
+      StubFree (.letfn name params fnBody body .recursive)
   | apply : StubFreeArgs argExprs → StubFree (.apply func argExprs kind)
   | prim : StubFreeArgs argExprs → StubFree (.prim op argExprs)
   | constr : StubFreeArgs argExprs → StubFree (.constr tag argExprs)
@@ -219,9 +221,8 @@ They appear as vacuous branches in any progress proof that takes a
 theorem StubFree.not_letrec {bindings : List (Var × List Param × Expr)} {body : Expr}
     (h : StubFree (.letrec bindings body)) : False := by cases h
 
-theorem StubFree.not_letfnRec {name : Var} {params : List Param}
-    {fnBody body : Expr}
-    (h : StubFree (.letfn name params fnBody body .recursive)) : False := by cases h
+-- NOTE: `.letfn .recursive` is no longer a stub (closed via closureRec).
+-- No more `StubFree.not_letfnRec`.
 
 -- NOTE: `.loop` is no longer a stub (closed via loopIter in FuelEval +
 -- loopIter_sound in FuelEvalSoundness). No more `StubFree.not_loop`.

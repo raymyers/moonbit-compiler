@@ -219,7 +219,11 @@ private theorem soundness_step_eval (n : Nat) (ih : SoundnessAt n) :
         exact Eval.letfnNonrec hname (ihE h)
     | recursive =>
       simp only [evalFuel] at h
-      simp at h  -- stub: .stuck "TODO"
+      cases hname : env name with
+      | some _ => rw [hname] at h; simp at h
+      | none =>
+        rw [hname] at h
+        exact Eval.letfnRec hname (ihE h)
     | tailJoin =>
       simp only [evalFuel] at h
       cases hname : jt name with
@@ -304,6 +308,19 @@ private theorem soundness_step_eval (n : Nat) (ih : SoundnessAt n) :
             simp only [hargs] at h
             split at h
             · exact Eval.applyRawFn henv (ihAok hargs) (by assumption) (ihE h)
+            · exact absurd h (by simp)
+        | closureRec captured recName params fnBody =>
+          cases hargs : evalFuelArgs n ft env s jt lt nl argExprs with
+          | outOfFuelArgs => simp only [hargs] at h; simp at h
+          | stuckArgs _ => simp only [hargs] at h; simp at h
+          | abortArgs oA sA nlA =>
+            simp only [hargs] at h
+            cases h
+            exact Eval.applyAbort (ihAabort hargs).1
+          | okVals argVals s₁ nl₁ =>
+            simp only [hargs] at h
+            split at h
+            · exact Eval.applyClosureRec henv (ihAok hargs) (by assumption) (ihE h)
             · exact absurd h (by simp)
         | _ => simp at h
       | none =>
