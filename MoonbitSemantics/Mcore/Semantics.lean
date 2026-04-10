@@ -207,10 +207,12 @@ inductive Eval (fnTable : FnTable) :
       s jt lt nl body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letfn name params fnBody body .nonRecursive) outcome s₁ nl₁
 
+  /-- `letfn .recursive`: binds `name` to a `Value.closureRec` that
+      defers self-reference to apply time. -/
   | letfnRec :
     env name = none →
-    recEnv = Env.extend env name (.closure recEnv params fnBody) →
-    Eval fnTable recEnv s jt lt nl body outcome s₁ nl₁ →
+    Eval fnTable (Env.extend env name (.closureRec env name params fnBody))
+      s jt lt nl body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letfn name params fnBody body .recursive) outcome s₁ nl₁
 
   | letfnTailJoin :
@@ -256,6 +258,16 @@ inductive Eval (fnTable : FnTable) :
     EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
     params.length = argVals.length →
     Eval fnTable (Env.bindParams Env.empty params argVals)
+      s₁ JoinTable.empty LoopTable.empty nl₁ fnBody outcome sr nlr →
+    Eval fnTable env s jt lt nl (.apply func argExprs (.normal funcTy)) outcome sr nlr
+
+  | applyClosureRec :
+    env func = some (.closureRec captured recName params fnBody) →
+    EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
+    params.length = argVals.length →
+    Eval fnTable (Env.bindParams
+        (Env.extend captured recName (.closureRec captured recName params fnBody))
+        params argVals)
       s₁ JoinTable.empty LoopTable.empty nl₁ fnBody outcome sr nlr →
     Eval fnTable env s jt lt nl (.apply func argExprs (.normal funcTy)) outcome sr nlr
 

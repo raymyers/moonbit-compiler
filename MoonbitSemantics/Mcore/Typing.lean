@@ -504,6 +504,7 @@ inductive ValClosureOk : Value → Mtype → FnTyTable → Prop where
     (∀ vals, v ≠ .tuple vals) →
     (∀ ps bd, v ≠ .rawFn ps bd) →
     (∀ tag args, v ≠ .constr tag args) →
+    (∀ cap recName ps bd, v ≠ .closureRec cap recName ps bd) →
     ValClosureOk v τ F
   | tuple :
     (hvals : ∀ i (hv : i < vals.length) (hτ : i < τs.length),
@@ -545,6 +546,17 @@ inductive ValClosureOk : Value → Mtype → FnTyTable → Prop where
     (hbody : HasType (TyEnv.bindParams (TyEnv.extend Γbase name (.func paramTys retTy)) params)
         JoinTyEnv.empty LoopTyEnv.empty F none body retTy) →
     ValClosureOk (.closure recEnv params body) (.func paramTys retTy) F
+  /-- `ValClosureOk` for `Value.closureRec` — used by letfnRec + applyClosureRec. -/
+  | closureRec :
+    (hptys : paramTys = params.map (·.ty)) →
+    (hbaseWT : EnvWellTyped baseEnv Γbase) →
+    (hbaseInv : ∀ x v' τ', baseEnv x = some v' → Γbase x = some τ' → ValClosureOk v' τ' F) →
+    (hbaseDisj : FnEnvDisjoint baseEnv F) →
+    (hFname : F name = none) →
+    (hparams : ∀ p, p ∈ params → F p.binder = none) →
+    (hbody : HasType (TyEnv.bindParams (TyEnv.extend Γbase name (.func paramTys retTy)) params)
+        JoinTyEnv.empty LoopTyEnv.empty F none body retTy) →
+    ValClosureOk (.closureRec baseEnv name params body) (.func paramTys retTy) F
   | recMutualClosure
     {bindings : List (Var × List Param × Expr)} :
     (hptys : paramTys_i = params_i.map (·.ty)) →

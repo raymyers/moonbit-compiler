@@ -260,14 +260,17 @@ invariant is maintained by all evaluation rules and gives us
 the body typing at application sites.
 -/
 
-/-- Non-closure, non-tuple, non-rawFn, non-constr values trivially satisfy ValClosureOk. -/
+/-- Non-closure, non-tuple, non-rawFn, non-constr, non-closureRec values
+    trivially satisfy ValClosureOk. -/
 theorem ValClosureOk.of_not_closure'
     (h : ∀ cap ps bd, v ≠ .closure cap ps bd)
     (h2 : ∀ vals, v ≠ .tuple vals := by intro _ h; cases h)
     (h3 : ∀ ps bd, v ≠ .rawFn ps bd := by intro _ _ h; cases h)
-    (h4 : ∀ tag args, v ≠ .constr tag args := by intro _ _ h; cases h) :
+    (h4 : ∀ tag args, v ≠ .constr tag args := by intro _ _ h; cases h)
+    (h5 : ∀ cap recName ps bd, v ≠ .closureRec cap recName ps bd := by
+      intro _ _ _ _ h; cases h) :
     ValClosureOk v τ F :=
-  .not_closure h h2 h3 h4
+  .not_closure h h2 h3 h4 h5
 
 /-- Extract per-element ValClosureOk from a tuple's proof. -/
 theorem ValClosureOk.tuple_getAt?
@@ -287,7 +290,7 @@ theorem ValClosureOk.tuple_getAt?
     rw [List.getElem?_eq_getElem hlen_τ] at hτ
     simp at hv hτ; rw [← hv, ← hτ]
     exact hvals pos hlen_v hlen_τ
-  | .not_closure _ htup _ _ => exact absurd rfl (htup _)
+  | .not_closure _ htup _ _ _ => exact absurd rfl (htup _)
 
 /-- Extract per-element ValClosureOk from a constr's proof. -/
 theorem ValClosureOk.constr_getAt?
@@ -307,7 +310,7 @@ theorem ValClosureOk.constr_getAt?
     rw [List.getElem?_eq_getElem hlen_τ] at hτ
     simp at hv hτ; rw [← hv, ← hτ]
     exact hvals pos hlen_v hlen_τ
-  | .not_closure _ _ _ hnotconstr => exact absurd rfl (hnotconstr _ _)
+  | .not_closure _ _ _ hnotconstr _ => exact absurd rfl (hnotconstr _ _)
 
 /-- Every closure in env has a well-typed body given its captured env. -/
 def ClosureInvariant (env : Env) (Γ : TyEnv) (F : FnTyTable) : Prop :=
@@ -743,7 +746,7 @@ private theorem evalPrim_valClosureOk
   match v with
   | .const _ | .unit | .loc _ =>
     exact .not_closure (fun _ _ _ h => by cases h) (fun _ h => by cases h)
-      (fun _ _ h => by cases h) (fun _ _ h => by cases h)
+      (fun _ _ h => by cases h) (fun _ _ h => by cases h) (fun _ _ _ _ h => by cases h)
   | .closure _ _ _ | .closureRec _ _ _ _ | .tuple _ | .rawFn _ _ | .constr _ _ =>
     have hid : op = .identity := by
       by_contra hop
@@ -1105,8 +1108,8 @@ theorem loc_store_consistency
   rw [hstore] at hstore'; cases hstore'
   exact ⟨hsize', htyped'⟩
 
-set_option maxHeartbeats 3200000 in
-set_option maxRecDepth 1024 in
+set_option maxHeartbeats 16000000 in
+set_option maxRecDepth 2048 in
 mutual
 
 /-- Preservation for argument list evaluation.
@@ -1307,13 +1310,13 @@ def preservation
       preservation htype_body heval_body henv' hft hcinv' (hdisj.extend hFname) hftc
         (hjwt.weakenΓ_extend (EnvWellTyped.env_none_Γ_none henv henv_fresh)) hjdc hllc hhft
 
-  | .letfnRec henv_fresh hrecEnv_eq heval_body => match htype with
+  | .letfnRec henv_fresh heval_body => match htype with
     | .letfnRec hFname hparams htype_fn htype_body =>
-      let hcl := ValClosureOk.recClosure rfl hrecEnv_eq henv (fun x v τ h1 h2 => hcinv x v τ h1 h2)
-        hdisj hFname hparams htype_fn
-      let henv' := hrecEnv_eq ▸ EnvWellTyped.extend_preserves henv ValueHasType.closure
-      let hcinv' := hrecEnv_eq ▸ ClosureInvariant.extend hcinv hcl
-      preservation htype_body heval_body henv' hft hcinv' (hrecEnv_eq ▸ hdisj.extend hFname) hftc
+      let hcl := ValClosureOk.closureRec rfl henv
+        (fun x v τ h1 h2 => hcinv x v τ h1 h2) hdisj hFname hparams htype_fn
+      let henv' := EnvWellTyped.extend_preserves henv ValueHasType.closureRec
+      let hcinv' := ClosureInvariant.extend hcinv hcl
+      preservation htype_body heval_body henv' hft hcinv' (hdisj.extend hFname) hftc
         (hjwt.weakenΓ_extend (EnvWellTyped.env_none_Γ_none henv henv_fresh)) hjdc hllc hhft
 
   | .letfnTailJoin (name := name) (params := params) (fnBody := fnBody)
@@ -1489,7 +1492,7 @@ def preservation
             exact hptys ▸ this)
         (preservation hbodyTyped heval_body henv_body hft hcinv_body
           (FnEnvDisjoint.bindParams hcapDisj _ _ hclosParams) hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty LoopLabelConsistent.empty hhft).liftFromEmptyΛ.liftFromNoneE
-      | .not_closure hnotcl _ _ _ => absurd rfl (hnotcl _ _ _)
+      | .not_closure hnotcl _ _ _ _ => absurd rfl (hnotcl _ _ _)
       | .recClosure hptys hrecEnv hbaseWT hbaseInv hbaseDisj hFname hclosParams hbodyTyped =>
         let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
         let hvts' := hptys ▸ apr.hasTypes
@@ -1570,10 +1573,46 @@ def preservation
             exact hptys ▸ this)
         (preservation hbodyTyped heval_body henv_body hft hcinv_body
           (FnEnvDisjoint.bindParams FnEnvDisjoint.empty _ _ hclosParams) hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty LoopLabelConsistent.empty hhft).liftFromEmptyΛ.liftFromNoneE
-      | .not_closure _ _ hnotrfn _ => absurd rfl (hnotrfn _ _)
+      | .not_closure _ _ hnotrfn _ _ => absurd rfl (hnotrfn _ _)
     | .applyClosure hΓ _ =>
       absurd (EnvWellTyped.lookup henv hΓ hfn) (fun h => ValueHasType.rawFn_not_func h)
     | .applyTopFn hF _ => absurd hF (by rw [hdisj.2.1 _ _ _ hfn]; exact fun h => nomatch h)
+  | .applyClosureRec (captured := captured) (recName := recName) (params := params_cr)
+      (fnBody := fnBody_cr)
+      hfn heval_args hlen heval_body => match htype with
+    | .applyClosure hΓ htype_args => by
+      have cinv_func := hcinv _ _ _ hfn hΓ
+      match cinv_func with
+      | .closureRec hptys hbaseWT hbaseInv hbaseDisj hFname hclosParams hbodyTyped =>
+        have apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+        have hvts' := hptys ▸ apr.hasTypes
+        have hlen_bp := by
+          have := hvts'.length_eq; simp [List.length_map] at this; omega
+        -- Extended env with self-reference
+        have hvt_rec : ValueHasType (.closureRec captured recName params_cr fnBody_cr)
+            (.func (params_cr.map (·.ty)) τ) := .closureRec
+        have hrecEnv_wt := EnvWellTyped.extend_preserves (x := recName)
+          hbaseWT hvt_rec
+        have hcl_self : ValClosureOk
+            (.closureRec captured recName params_cr fnBody_cr)
+            (.func (params_cr.map (·.ty)) τ) F :=
+          .closureRec rfl hbaseWT hbaseInv hbaseDisj hFname hclosParams (hptys ▸ hbodyTyped)
+        have hrecEnv_inv := ClosureInvariant.extend (x := recName)
+          (show ClosureInvariant captured _ F from fun x v τ h1 h2 => hbaseInv x v τ h1 h2)
+          hcl_self
+        have henv_body := EnvWellTyped.bindParams_preserves hrecEnv_wt _ _ hvts' hlen_bp.symm
+        have hcinv_body := ClosureInvariant.bindParams hrecEnv_inv _ _ hvts' hlen_bp.symm
+          (fun i hv hτ => by
+            have := apr.closureOks i hv (by subst hptys; simp [List.length_map]; exact hτ)
+            exact hptys ▸ this)
+        exact (preservation (hptys ▸ hbodyTyped) heval_body henv_body hft hcinv_body
+          (FnEnvDisjoint.bindParams (hbaseDisj.extend hFname) _ _ hclosParams)
+          hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty
+          LoopLabelConsistent.empty hhft).liftFromEmptyΛ.liftFromNoneE
+      | .not_closure _ _ _ _ hnotcr => exact absurd rfl (hnotcr _ _ _ _)
+    | .applyRawFn hΓ _ =>
+      absurd (EnvWellTyped.lookup henv hΓ hfn) (fun h => by cases h)
+    | .applyTopFn hF _ => absurd hF (by rw [hdisj.2.2 _ _ _ _ _ hfn]; exact fun h => nomatch h)
   | .applyTopFn hfnlookup heval_args hlen heval_body => match htype with
     | .applyTopFn hF htype_args => by
       -- From FnTableWellTyped: get params/body from ft that match F

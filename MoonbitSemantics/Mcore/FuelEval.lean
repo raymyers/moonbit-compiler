@@ -96,9 +96,11 @@ def evalFuel : Nat → FnTable → Env → Store → JoinTable → LoopTable →
           evalFuel n ft (Env.extend env name (.closure env params fnBody))
             s jt lt nl body
       | .recursive =>
-        -- recEnv = env.extend name (.closure recEnv params fnBody) is
-        -- self-referential. Deferred to a later sub-phase.
-        .stuck "TODO: letfnRec"
+        match env name with
+        | some _ => .stuck "letfnRec: name not fresh in env"
+        | none =>
+          evalFuel n ft (Env.extend env name (.closureRec env name params fnBody))
+            s jt lt nl body
       | .tailJoin =>
         match jt name with
         | some _ => .stuck "letfnTailJoin: name not fresh in jt"
@@ -155,6 +157,18 @@ def evalFuel : Nat → FnTable → Env → Store → JoinTable → LoopTable →
             evalFuel n ft (Env.bindParams Env.empty params argVals)
               s₁ JoinTable.empty LoopTable.empty nl₁ fnBody
           else .stuck "applyRawFn: param/arg length mismatch"
+        | .abortArgs o s₁ nl₁ => .ok o s₁ nl₁
+        | .outOfFuelArgs => .outOfFuel
+        | .stuckArgs r => .stuck r
+      | some (.closureRec captured recName params fnBody) =>
+        match evalFuelArgs n ft env s jt lt nl argExprs with
+        | .okVals argVals s₁ nl₁ =>
+          if params.length = argVals.length then
+            evalFuel n ft (Env.bindParams
+              (Env.extend captured recName (.closureRec captured recName params fnBody))
+              params argVals)
+              s₁ JoinTable.empty LoopTable.empty nl₁ fnBody
+          else .stuck "applyClosureRec: param/arg length mismatch"
         | .abortArgs o s₁ nl₁ => .ok o s₁ nl₁
         | .outOfFuelArgs => .outOfFuel
         | .stuckArgs r => .stuck r
