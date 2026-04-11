@@ -57,6 +57,7 @@ inductive StubFree : Expr → Prop where
       StubFree (.letfn name params fnBody body .nontailJoin)
   | letfnRec : StubFree fnBody → StubFree body →
       StubFree (.letfn name params fnBody body .recursive)
+  | letrec : StubFree body → StubFree (.letrec bindings body)
   | apply : StubFreeArgs argExprs → StubFree (.apply func argExprs kind)
   | prim : StubFreeArgs argExprs → StubFree (.prim op argExprs)
   | constr : StubFreeArgs argExprs → StubFree (.constr tag argExprs)
@@ -217,9 +218,6 @@ theorem progress_breakNone
 or `.loop _ _ _ _`, so inversion immediately discharges these cases.
 They appear as vacuous branches in any progress proof that takes a
 `StubFree e` hypothesis. -/
-
-theorem StubFree.not_letrec {bindings : List (Var × List Param × Expr)} {body : Expr}
-    (h : StubFree (.letrec bindings body)) : False := by cases h
 
 -- NOTE: `.letfn .recursive` is no longer a stub (closed via closureRec).
 -- No more `StubFree.not_letfnRec`.

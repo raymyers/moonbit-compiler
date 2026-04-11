@@ -81,6 +81,7 @@ theorem evalPrim_type_sound'
       | unit => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> exact .unit
       | closure => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> first | exact .unit | exact .closure
       | closureRec => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> first | exact .unit | exact .closureRec
+      | closureRecMutual => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> first | exact .unit | exact .closureRecMutual
       | rawFn => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> first | exact .unit | exact .rawFn
       | constr hvl => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> first | exact .unit | exact .constr hvl
       | tuple hvts => cases op <;> simp [evalPrim] at heval <;> simp [typeOfPrim] at hprim <;> subst_vars <;> first | exact .unit | exact .tuple hvts

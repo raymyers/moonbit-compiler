@@ -27,6 +27,12 @@ inductive Value where
       at apply time. Used for `letfn _ _ _ _ .recursive` and `letrec`. -/
   | closureRec (captured : Var → Option Value) (recName : Var)
       (params : List Param) (body : Expr)
+  /-- Mutually recursive closure for `letrec`. Stores the base env and
+      the full bindings list. At apply time, reconstructs the full mutual
+      env by extending base with closureRecMutual values for all peers. -/
+  | closureRecMutual (baseEnv : Var → Option Value)
+      (allBindings : List (Var × List Param × Expr))
+      (params : List Param) (body : Expr)
   | rawFn (params : List Param) (body : Expr)
   | constr (tag : ConstrTag) (args : List Value)
   | tuple (vals : List Value)
@@ -64,6 +70,12 @@ def Env.extendMany (env : Env) (bindings : List (Var × Value)) : Env :=
 
 def Env.bindParams (env : Env) (params : List Param) (args : List Value) : Env :=
   Env.extendMany env (params.map (·.binder) |>.zip args)
+
+/-- Build the mutual recursive env for `letrec`: extend `baseEnv` with
+    a `closureRecMutual` for each binding. -/
+def Env.extendLetrec (baseEnv : Env) (bindings : List (Var × List Param × Expr)) : Env :=
+  Env.extendMany baseEnv
+    (bindings.map fun (name, ps, bd) => (name, .closureRecMutual baseEnv bindings ps bd))
 
 
 /-! ## Function table -/

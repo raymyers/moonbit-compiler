@@ -239,10 +239,12 @@ private theorem soundness_step_eval (n : Nat) (ih : SoundnessAt n) :
         rw [hname] at h
         exact Eval.letfnNontailJoin hname (ihE h)
 
-  -- Letrec (stub)
-  | letrec _ _ =>
+  -- Letrec
+  | letrec bindings body =>
     simp only [evalFuel] at h
-    simp at h
+    split at h
+    · exact absurd h (by simp)
+    · exact Eval.letrecV2 (ihE h)
 
   -- Function application
   | apply func argExprs kind =>
@@ -321,6 +323,19 @@ private theorem soundness_step_eval (n : Nat) (ih : SoundnessAt n) :
             simp only [hargs] at h
             split at h
             · exact Eval.applyClosureRec henv (ihAok hargs) (by assumption) (ihE h)
+            · exact absurd h (by simp)
+        | closureRecMutual baseEnv allBindings params fnBody =>
+          cases hargs : evalFuelArgs n ft env s jt lt nl argExprs with
+          | outOfFuelArgs => simp only [hargs] at h; simp at h
+          | stuckArgs _ => simp only [hargs] at h; simp at h
+          | abortArgs oA sA nlA =>
+            simp only [hargs] at h
+            cases h
+            exact Eval.applyAbort (ihAabort hargs).1
+          | okVals argVals s₁ nl₁ =>
+            simp only [hargs] at h
+            split at h
+            · exact Eval.applyClosureRecMutual henv (ihAok hargs) (by assumption) (ihE h)
             · exact absurd h (by simp)
         | _ => simp at h
       | none =>

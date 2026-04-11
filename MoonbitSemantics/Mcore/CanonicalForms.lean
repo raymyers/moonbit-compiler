@@ -29,6 +29,7 @@ theorem canonical_bool {v : Value} (h : ValueHasType v .bool) :
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -41,6 +42,7 @@ theorem canonical_int {v : Value} (h : ValueHasType v .int) :
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -53,6 +55,7 @@ theorem canonical_int64 {v : Value} (h : ValueHasType v .int64) :
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -65,6 +68,7 @@ theorem canonical_float {v : Value} (h : ValueHasType v .float) :
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -77,6 +81,7 @@ theorem canonical_double {v : Value} (h : ValueHasType v .double) :
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -89,6 +94,7 @@ theorem canonical_string {v : Value} (h : ValueHasType v .string) :
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -101,6 +107,7 @@ theorem canonical_char {v : Value} (h : ValueHasType v .char) :
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -113,6 +120,7 @@ theorem canonical_byte {v : Value} (h : ValueHasType v .byte) :
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -126,6 +134,7 @@ theorem canonical_unit {v : Value} (h : ValueHasType v .unit) :
   | unit => left; rfl
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -138,7 +147,9 @@ theorem canonical_func {v : Value} {paramTys retTy}
     (∃ captured params body,
       v = .closure captured params body ∧ paramTys = params.map (·.ty)) ∨
     (∃ captured recName params body,
-      v = .closureRec captured recName params body ∧ paramTys = params.map (·.ty)) := by
+      v = .closureRec captured recName params body ∧ paramTys = params.map (·.ty)) ∨
+    (∃ baseEnv allBindings params body,
+      v = .closureRecMutual baseEnv allBindings params body ∧ paramTys = params.map (·.ty)) := by
   cases v with
   | const c => cases c <;> cases h
   | unit => cases h
@@ -147,7 +158,10 @@ theorem canonical_func {v : Value} {paramTys retTy}
     | closure => left; exact ⟨_, _, _, rfl, rfl⟩
   | closureRec _ _ _ _ =>
     cases h with
-    | closureRec => right; exact ⟨_, _, _, _, rfl, rfl⟩
+    | closureRec => right; left; exact ⟨_, _, _, _, rfl, rfl⟩
+  | closureRecMutual _ _ _ _ =>
+    cases h with
+    | closureRecMutual => right; right; exact ⟨_, _, _, _, rfl, rfl⟩
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -161,6 +175,7 @@ theorem canonical_rawFunc {v : Value} {paramTys retTy}
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ =>
     cases h with
     | rawFn => exact ⟨_, _, rfl, rfl⟩
@@ -178,6 +193,7 @@ theorem canonical_tuple {v : Value} {τs}
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple vals =>
@@ -196,6 +212,7 @@ theorem canonical_constr {v : Value} {tid ats}
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr tag args =>
     cases h with
@@ -211,6 +228,7 @@ theorem canonical_fixedarray {v : Value} {elemTy}
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -228,6 +246,7 @@ theorem canonical_errorValueResult {v : Value} {okTy errTy tid}
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr tag args =>
     cases h with
@@ -252,6 +271,7 @@ theorem canonical_int16_absurd {v : Value} (h : ValueHasType v .int16) : False :
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -263,6 +283,7 @@ theorem canonical_uint16_absurd {v : Value} (h : ValueHasType v .uint16) : False
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -274,6 +295,7 @@ theorem canonical_uint_absurd {v : Value} (h : ValueHasType v .uint) : False := 
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -285,6 +307,7 @@ theorem canonical_uint64_absurd {v : Value} (h : ValueHasType v .uint64) : False
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -296,6 +319,7 @@ theorem canonical_bytes_absurd {v : Value} (h : ValueHasType v .bytes) : False :
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -308,6 +332,7 @@ theorem canonical_optimizedOption_absurd {v : Value} {t}
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -320,6 +345,7 @@ theorem canonical_trait_absurd {v : Value} {id}
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -332,6 +358,7 @@ theorem canonical_any_absurd {v : Value} {id}
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h
@@ -344,6 +371,7 @@ theorem canonical_maybeUninit_absurd {v : Value} {t}
   | unit => cases h
   | closure _ _ _ => cases h
   | closureRec _ _ _ _ => cases h
+  | closureRecMutual _ _ _ _ => cases h
   | rawFn _ _ => cases h
   | constr _ _ => cases h
   | tuple _ => cases h

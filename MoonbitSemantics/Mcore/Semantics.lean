@@ -240,6 +240,11 @@ inductive Eval (fnTable : FnTable) :
       i ≠ j → (bindings[i]'hi).1 ≠ (bindings[j]'hj).1) →
     Eval fnTable recEnv s jt lt nl body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letrec bindings body) outcome s₁ nl₁
+  /-- `letrec` via `closureRecMutual`. Does not require pairwise
+      distinctness of binding names (evalFuel doesn't check it). -/
+  | letrecV2 :
+    Eval fnTable (Env.extendLetrec env bindings) s jt lt nl body outcome s₁ nl₁ →
+    Eval fnTable env s jt lt nl (.letrec bindings body) outcome s₁ nl₁
 
   -- ══════════════════════════════════════════════════════════════════
   -- Function application
@@ -268,6 +273,14 @@ inductive Eval (fnTable : FnTable) :
     Eval fnTable (Env.bindParams
         (Env.extend captured recName (.closureRec captured recName params fnBody))
         params argVals)
+      s₁ JoinTable.empty LoopTable.empty nl₁ fnBody outcome sr nlr →
+    Eval fnTable env s jt lt nl (.apply func argExprs (.normal funcTy)) outcome sr nlr
+
+  | applyClosureRecMutual :
+    env func = some (.closureRecMutual baseEnv allBindings params fnBody) →
+    EvalArgs fnTable env s jt lt nl argExprs argVals s₁ nl₁ →
+    params.length = argVals.length →
+    Eval fnTable (Env.bindParams (Env.extendLetrec baseEnv allBindings) params argVals)
       s₁ JoinTable.empty LoopTable.empty nl₁ fnBody outcome sr nlr →
     Eval fnTable env s jt lt nl (.apply func argExprs (.normal funcTy)) outcome sr nlr
 

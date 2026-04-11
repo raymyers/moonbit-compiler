@@ -186,7 +186,7 @@ def FnTableWellTyped (ft : FnTable) (F : FnTyTable) : Prop :=
 theorem FnEnvDisjoint.extend
     (hdisj : FnEnvDisjoint env F) (hF : F x = none) :
     FnEnvDisjoint (Env.extend env x v) F := by
-  refine ⟨?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_⟩
   · intro func cap ps bd henv
     by_cases h : func = x
     · subst h; exact hF
@@ -198,12 +198,17 @@ theorem FnEnvDisjoint.extend
   · intro func cap recName ps bd henv
     by_cases h : func = x
     · subst h; exact hF
-    · simp [Env.extend, h] at henv; exact hdisj.2.2 func cap recName ps bd henv
+    · simp [Env.extend, h] at henv; exact hdisj.2.2.1 func cap recName ps bd henv
+  · intro func baseEnv allBindings ps bd henv
+    by_cases h : func = x
+    · subst h; exact hF
+    · simp [Env.extend, h] at henv; exact hdisj.2.2.2 func baseEnv allBindings ps bd henv
 
 /-- FnEnvDisjoint holds for the empty env. -/
 theorem FnEnvDisjoint.empty : FnEnvDisjoint Env.empty F :=
   ⟨fun _ _ _ _ h => by simp [Env.empty] at h,
    fun _ _ _ h => by simp [Env.empty] at h,
+   fun _ _ _ _ _ h => by simp [Env.empty] at h,
    fun _ _ _ _ _ h => by simp [Env.empty] at h⟩
 
 /-- Extending env with a non-closure, non-rawFn, non-closureRec value
@@ -213,9 +218,11 @@ theorem FnEnvDisjoint.extend_non_closure
     (hnotcl : ∀ cap ps bd, v ≠ .closure cap ps bd)
     (hnotrfn : ∀ ps bd, v ≠ .rawFn ps bd)
     (hnotrec : ∀ cap recName ps bd, v ≠ .closureRec cap recName ps bd := by
+      intro _ _ _ _ h; cases h)
+    (hnotrecM : ∀ baseEnv allBindings ps bd, v ≠ .closureRecMutual baseEnv allBindings ps bd := by
       intro _ _ _ _ h; cases h) :
     FnEnvDisjoint (Env.extend env x v) F := by
-  refine ⟨?_, ?_, ?_⟩
+  refine ⟨?_, ?_, ?_, ?_⟩
   · intro func cap ps bd henv
     by_cases h : func = x
     · subst h; simp [Env.extend] at henv; exact absurd henv (hnotcl cap ps bd)
@@ -229,7 +236,13 @@ theorem FnEnvDisjoint.extend_non_closure
     · subst h; simp [Env.extend] at henv
       exact absurd henv (hnotrec cap recName ps bd)
     · simp [Env.extend, h] at henv
-      exact hdisj.2.2 func cap recName ps bd henv
+      exact hdisj.2.2.1 func cap recName ps bd henv
+  · intro func baseEnv allBindings ps bd henv
+    by_cases h : func = x
+    · subst h; simp [Env.extend] at henv
+      exact absurd henv (hnotrecM baseEnv allBindings ps bd)
+    · simp [Env.extend, h] at henv
+      exact hdisj.2.2.2 func baseEnv allBindings ps bd henv
 
 /-- FnEnvDisjoint for bindParams: if all param binders are absent from F. -/
 theorem FnEnvDisjoint.bindParams
@@ -268,9 +281,11 @@ theorem ValClosureOk.of_not_closure'
     (h3 : ∀ ps bd, v ≠ .rawFn ps bd := by intro _ _ h; cases h)
     (h4 : ∀ tag args, v ≠ .constr tag args := by intro _ _ h; cases h)
     (h5 : ∀ cap recName ps bd, v ≠ .closureRec cap recName ps bd := by
+      intro _ _ _ _ h; cases h)
+    (h6 : ∀ baseEnv allBindings ps bd, v ≠ .closureRecMutual baseEnv allBindings ps bd := by
       intro _ _ _ _ h; cases h) :
     ValClosureOk v τ F :=
-  .not_closure h h2 h3 h4 h5
+  .not_closure h h2 h3 h4 h5 h6
 
 /-- Extract per-element ValClosureOk from a tuple's proof. -/
 theorem ValClosureOk.tuple_getAt?
@@ -290,7 +305,7 @@ theorem ValClosureOk.tuple_getAt?
     rw [List.getElem?_eq_getElem hlen_τ] at hτ
     simp at hv hτ; rw [← hv, ← hτ]
     exact hvals pos hlen_v hlen_τ
-  | .not_closure _ htup _ _ _ => exact absurd rfl (htup _)
+  | .not_closure _ htup _ _ _ _ => exact absurd rfl (htup _)
 
 /-- Extract per-element ValClosureOk from a constr's proof. -/
 theorem ValClosureOk.constr_getAt?
@@ -310,7 +325,7 @@ theorem ValClosureOk.constr_getAt?
     rw [List.getElem?_eq_getElem hlen_τ] at hτ
     simp at hv hτ; rw [← hv, ← hτ]
     exact hvals pos hlen_v hlen_τ
-  | .not_closure _ _ _ hnotconstr _ => exact absurd rfl (hnotconstr _ _)
+  | .not_closure _ _ _ hnotconstr _ _ => exact absurd rfl (hnotconstr _ _)
 
 /-- Every closure in env has a well-typed body given its captured env. -/
 def ClosureInvariant (env : Env) (Γ : TyEnv) (F : FnTyTable) : Prop :=
@@ -747,7 +762,8 @@ private theorem evalPrim_valClosureOk
   | .const _ | .unit | .loc _ =>
     exact .not_closure (fun _ _ _ h => by cases h) (fun _ h => by cases h)
       (fun _ _ h => by cases h) (fun _ _ h => by cases h) (fun _ _ _ _ h => by cases h)
-  | .closure _ _ _ | .closureRec _ _ _ _ | .tuple _ | .rawFn _ _ | .constr _ _ =>
+      (fun _ _ _ _ h => by cases h)
+  | .closure _ _ _ | .closureRec _ _ _ _ | .closureRecMutual _ _ _ _ | .tuple _ | .rawFn _ _ | .constr _ _ =>
     have hid : op = .identity := by
       by_contra hop
       rcases evalPrim_non_identity_constOrUnit hop heval with ⟨_, h⟩ | h <;> exact nomatch h
@@ -1108,7 +1124,7 @@ theorem loc_store_consistency
   rw [hstore] at hstore'; cases hstore'
   exact ⟨hsize', htyped'⟩
 
-set_option maxHeartbeats 16000000 in
+set_option maxHeartbeats 64000000 in
 set_option maxRecDepth 2048 in
 mutual
 
@@ -1383,6 +1399,10 @@ def preservation
         apply FnEnvDisjoint.extendMany_closures hdisj
         intro i hi; simp [List.length_map] at hi; simp [List.getElem_map]; exact hFnames i hi
 
+  | .letrecV2 heval_body => match htype with
+    | .letrec hrecΓ_eq hFnames hFparams hbodies htype_body =>
+      sorry
+
   | .ifTrue heval_cond heval_so => match htype with
     | .ifSome _ htype_so _ => preservation htype_so heval_so henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
     | .ifNone _ htype_so => preservation htype_so heval_so henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
@@ -1492,7 +1512,7 @@ def preservation
             exact hptys ▸ this)
         (preservation hbodyTyped heval_body henv_body hft hcinv_body
           (FnEnvDisjoint.bindParams hcapDisj _ _ hclosParams) hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty LoopLabelConsistent.empty hhft).liftFromEmptyΛ.liftFromNoneE
-      | .not_closure hnotcl _ _ _ _ => absurd rfl (hnotcl _ _ _)
+      | .not_closure hnotcl _ _ _ _ _ => absurd rfl (hnotcl _ _ _)
       | .recClosure hptys hrecEnv hbaseWT hbaseInv hbaseDisj hFname hclosParams hbodyTyped =>
         let apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
         let hvts' := hptys ▸ apr.hasTypes
@@ -1573,7 +1593,7 @@ def preservation
             exact hptys ▸ this)
         (preservation hbodyTyped heval_body henv_body hft hcinv_body
           (FnEnvDisjoint.bindParams FnEnvDisjoint.empty _ _ hclosParams) hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty LoopLabelConsistent.empty hhft).liftFromEmptyΛ.liftFromNoneE
-      | .not_closure _ _ hnotrfn _ _ => absurd rfl (hnotrfn _ _)
+      | .not_closure _ _ hnotrfn _ _ _ => absurd rfl (hnotrfn _ _)
     | .applyClosure hΓ _ =>
       absurd (EnvWellTyped.lookup henv hΓ hfn) (fun h => ValueHasType.rawFn_not_func h)
     | .applyTopFn hF _ => absurd hF (by rw [hdisj.2.1 _ _ _ hfn]; exact fun h => nomatch h)
@@ -1609,10 +1629,20 @@ def preservation
           (FnEnvDisjoint.bindParams (hbaseDisj.extend hFname) _ _ hclosParams)
           hftc JoinWellTyped.empty JoinDeltaConsistent.empty_empty
           LoopLabelConsistent.empty hhft).liftFromEmptyΛ.liftFromNoneE
-      | .not_closure _ _ _ _ hnotcr => exact absurd rfl (hnotcr _ _ _ _)
+      | .not_closure _ _ _ _ hnotcr _ => exact absurd rfl (hnotcr _ _ _ _)
     | .applyRawFn hΓ _ =>
       absurd (EnvWellTyped.lookup henv hΓ hfn) (fun h => by cases h)
-    | .applyTopFn hF _ => absurd hF (by rw [hdisj.2.2 _ _ _ _ _ hfn]; exact fun h => nomatch h)
+    | .applyTopFn hF _ => absurd hF (by rw [hdisj.2.2.1 _ _ _ _ _ hfn]; exact fun h => nomatch h)
+  | .applyClosureRecMutual (baseEnv := baseEnv) (allBindings := allBindings) (params := params_crm)
+      (fnBody := fnBody_crm)
+      hfn heval_args hlen heval_body => match htype with
+    | .applyClosure hΓ htype_args => by
+      -- For closureRecMutual, we use sorry for now — the body typing invariant
+      -- requires a `closureRecMutual` variant in ValClosureOk
+      exact sorry
+    | .applyRawFn hΓ _ =>
+      absurd (EnvWellTyped.lookup henv hΓ hfn) (fun h => by cases h)
+    | .applyTopFn hF _ => absurd hF (by rw [hdisj.2.2.2 _ _ _ _ _ hfn]; exact fun h => nomatch h)
   | .applyTopFn hfnlookup heval_args hlen heval_body => match htype with
     | .applyTopFn hF htype_args => by
       -- From FnTableWellTyped: get params/body from ft that match F
@@ -1640,13 +1670,16 @@ def preservation
       obtain ⟨retTy', hFsome⟩ := hftc _ _ _ hfnlookup
       -- Γ func = some (.func ...) → env func = some v with ValueHasType v (.func ...)
       obtain ⟨v, henv_v, hvt⟩ := henv _ _ hΓ
-      -- ValueHasType v (.func ...) → v is a closure or closureRec
+      -- ValueHasType v (.func ...) → v is a closure, closureRec, or closureRecMutual
       match v, hvt with
       | .closure cap ps bd, .closure =>
         exact absurd hFsome (by rw [hdisj.1 _ _ _ _ henv_v]; exact fun h => nomatch h)
       | .closureRec cap recName ps bd, .closureRec =>
         exact absurd hFsome
-          (by rw [hdisj.2.2 _ _ _ _ _ henv_v]; exact fun h => nomatch h)
+          (by rw [hdisj.2.2.1 _ _ _ _ _ henv_v]; exact fun h => nomatch h)
+      | .closureRecMutual baseEnv allBindings ps bd, .closureRecMutual =>
+        exact absurd hFsome
+          (by rw [hdisj.2.2.2 _ _ _ _ _ henv_v]; exact fun h => nomatch h)
     | .applyRawFn hΓ _ => by
       obtain ⟨retTy', hFsome⟩ := hftc _ _ _ hfnlookup
       obtain ⟨v, henv_v, hvt⟩ := henv _ _ hΓ

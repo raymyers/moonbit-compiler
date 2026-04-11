@@ -115,10 +115,11 @@ def evalFuel : Nat → FnTable → Env → Store → JoinTable → LoopTable →
             lt nl body
 
     -- ════════ Letrec ════════
-    | .letrec _ _ =>
-      -- recEnv = Env.extendMany env (bindings.map ...) is self-referential.
-      -- Deferred to a later sub-phase.
-      .stuck "TODO: letrec"
+    | .letrec bindings body =>
+      if bindings.any (fun (name, _, _) => (env name).isSome) then
+        .stuck "letrec: binding name not fresh in env"
+      else
+        evalFuel n ft (Env.extendLetrec env bindings) s jt lt nl body
 
     -- ════════ Function application ════════
     | .apply func argExprs .join =>
@@ -169,6 +170,16 @@ def evalFuel : Nat → FnTable → Env → Store → JoinTable → LoopTable →
               params argVals)
               s₁ JoinTable.empty LoopTable.empty nl₁ fnBody
           else .stuck "applyClosureRec: param/arg length mismatch"
+        | .abortArgs o s₁ nl₁ => .ok o s₁ nl₁
+        | .outOfFuelArgs => .outOfFuel
+        | .stuckArgs r => .stuck r
+      | some (.closureRecMutual baseEnv allBindings params fnBody) =>
+        match evalFuelArgs n ft env s jt lt nl argExprs with
+        | .okVals argVals s₁ nl₁ =>
+          if params.length = argVals.length then
+            evalFuel n ft (Env.bindParams (Env.extendLetrec baseEnv allBindings) params argVals)
+              s₁ JoinTable.empty LoopTable.empty nl₁ fnBody
+          else .stuck "applyClosureRecMutual: param/arg length mismatch"
         | .abortArgs o s₁ nl₁ => .ok o s₁ nl₁
         | .outOfFuelArgs => .outOfFuel
         | .stuckArgs r => .stuck r

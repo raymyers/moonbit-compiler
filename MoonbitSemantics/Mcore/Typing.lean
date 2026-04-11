@@ -453,6 +453,8 @@ inductive ValueHasType : Value → Mtype → Prop where
     ValueHasType (.closure captured params body) (.func (params.map (·.ty)) retTy)
   | closureRec :
     ValueHasType (.closureRec captured recName params body) (.func (params.map (·.ty)) retTy)
+  | closureRecMutual :
+    ValueHasType (.closureRecMutual baseEnv allBindings params body) (.func (params.map (·.ty)) retTy)
   | rawFn :
     ValueHasType (.rawFn params body) (.rawFunc (params.map (·.ty)) retTy)
   | constr :
@@ -494,7 +496,9 @@ def FnEnvDisjoint (env : Env) (F : FnTyTable) : Prop :=
   (∀ func cap ps bd, env func = some (.closure cap ps bd) → F func = none) ∧
   (∀ func ps bd, env func = some (.rawFn ps bd) → F func = none) ∧
   (∀ func cap recName ps bd,
-    env func = some (.closureRec cap recName ps bd) → F func = none)
+    env func = some (.closureRec cap recName ps bd) → F func = none) ∧
+  (∀ func baseEnv allBindings ps bd,
+    env func = some (.closureRecMutual baseEnv allBindings ps bd) → F func = none)
 
 /-- A single value satisfies the closure invariant.
     For closures, provides body typing + ClosureInvariant for captured env. -/
@@ -505,6 +509,7 @@ inductive ValClosureOk : Value → Mtype → FnTyTable → Prop where
     (∀ ps bd, v ≠ .rawFn ps bd) →
     (∀ tag args, v ≠ .constr tag args) →
     (∀ cap recName ps bd, v ≠ .closureRec cap recName ps bd) →
+    (∀ baseEnv allBindings ps bd, v ≠ .closureRecMutual baseEnv allBindings ps bd) →
     ValClosureOk v τ F
   | tuple :
     (hvals : ∀ i (hv : i < vals.length) (hτ : i < τs.length),
