@@ -240,9 +240,10 @@ inductive Eval (fnTable : FnTable) :
       i ≠ j → (bindings[i]'hi).1 ≠ (bindings[j]'hj).1) →
     Eval fnTable recEnv s jt lt nl body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letrec bindings body) outcome s₁ nl₁
-  /-- `letrec` via `closureRecMutual`. Does not require pairwise
-      distinctness of binding names (evalFuel doesn't check it). -/
+  /-- `letrec` via `closureRecMutual`. Requires env freshness (checked
+      by evalFuel) but not distinctness (not checked by evalFuel). -/
   | letrecV2 :
+    (∀ i (hi : i < bindings.length), env (bindings[i]'hi).1 = none) →
     Eval fnTable (Env.extendLetrec env bindings) s jt lt nl body outcome s₁ nl₁ →
     Eval fnTable env s jt lt nl (.letrec bindings body) outcome s₁ nl₁
 

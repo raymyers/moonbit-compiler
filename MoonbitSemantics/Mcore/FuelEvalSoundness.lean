@@ -244,7 +244,15 @@ private theorem soundness_step_eval (n : Nat) (ih : SoundnessAt n) :
     simp only [evalFuel] at h
     split at h
     · exact absurd h (by simp)
-    · exact Eval.letrecV2 (ihE h)
+    · rename_i hfresh
+      have henv_fresh : ∀ i (hi : i < bindings.length), env (bindings[i]'hi).1 = none := by
+        intro i hi
+        by_contra hne
+        apply absurd hfresh
+        simp only [ne_eq, not_not]
+        refine List.any_eq_true.mpr ⟨(bindings[i]'hi), List.getElem_mem hi, ?_⟩
+        simp [Option.isSome_iff_ne_none.mpr hne]
+      exact Eval.letrecV2 henv_fresh (ihE h)
 
   -- Function application
   | apply func argExprs kind =>

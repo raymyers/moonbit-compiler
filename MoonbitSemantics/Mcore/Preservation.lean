@@ -1399,11 +1399,12 @@ def preservation
         apply FnEnvDisjoint.extendMany_closures hdisj
         intro i hi; simp [List.length_map] at hi; simp [List.getElem_map]; exact hFnames i hi
 
-  | .letrecV2 heval_body => match htype with
+  | .letrecV2 henv_fresh heval_body => match htype with
     | .letrec hrecΓ_eq hFnames hFparams hbodies htype_body =>
-      -- Needs EnvWellTyped + ClosureInvariant + FnEnvDisjoint for
-      -- Env.extendLetrec env bindings. Each closureRecMutual value
-      -- satisfies closureRecMutualOk (constructor added in Typing.lean).
+      -- letrecV2 + closureRecMutual: sorry for now because the proof
+      -- needs distinctness (not in the Eval rule) for JoinWellTyped
+      -- weakening, and the recursive call to preservation with a sorry
+      -- argument breaks structural recursion inference.
       sorry
 
   | .ifTrue heval_cond heval_so => match htype with
@@ -1640,9 +1641,17 @@ def preservation
       (fnBody := fnBody_crm)
       hfn heval_args hlen heval_body => match htype with
     | .applyClosure hΓ htype_args => by
-      -- For closureRecMutual, we use sorry for now — the body typing invariant
-      -- requires a `closureRecMutual` variant in ValClosureOk
-      exact sorry
+      have cinv_func := hcinv _ _ _ hfn hΓ
+      match cinv_func with
+      | .closureRecMutualOk hptys hbaseWT hbaseInv hbaseDisj hFnames hFparams =>
+        have apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
+        have hvts' := hptys ▸ apr.hasTypes
+        have hlen_bp := by
+          have := hvts'.length_eq; simp [List.length_map] at this; omega
+        -- Build EnvWellTyped for Env.extendLetrec baseEnv allBindings
+        -- This needs the same pattern as letrecV2
+        exact sorry  -- needs extendLetrec typing infrastructure
+      | .not_closure _ _ _ _ _ hnotcrm => exact absurd rfl (hnotcrm _ _ _ _)
     | .applyRawFn hΓ _ =>
       absurd (EnvWellTyped.lookup henv hΓ hfn) (fun h => by cases h)
     | .applyTopFn hF _ => absurd hF (by rw [hdisj.2.2.2 _ _ _ _ _ hfn]; exact fun h => nomatch h)
