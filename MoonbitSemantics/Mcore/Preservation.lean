@@ -1124,6 +1124,10 @@ theorem loc_store_consistency
   rw [hstore] at hstore'; cases hstore'
   exact ⟨hsize', htyped'⟩
 
+-- Placeholder for extendLetrec invariants. Removed from outside the mutual
+-- block since the JoinWellTyped component needs jt/Δ/Λ which are only
+-- available inside the match.
+
 set_option maxHeartbeats 64000000 in
 set_option maxRecDepth 2048 in
 mutual
@@ -1401,10 +1405,6 @@ def preservation
 
   | .letrecV2 henv_fresh heval_body => match htype with
     | .letrec hrecΓ_eq hFnames hFparams hbodies htype_body =>
-      -- letrecV2 + closureRecMutual: sorry for now because the proof
-      -- needs distinctness (not in the Eval rule) for JoinWellTyped
-      -- weakening, and the recursive call to preservation with a sorry
-      -- argument breaks structural recursion inference.
       sorry
 
   | .ifTrue heval_cond heval_so => match htype with
@@ -1648,9 +1648,10 @@ def preservation
         have hvts' := hptys ▸ apr.hasTypes
         have hlen_bp := by
           have := hvts'.length_eq; simp [List.length_map] at this; omega
-        -- Build EnvWellTyped for Env.extendLetrec baseEnv allBindings
-        -- This needs the same pattern as letrecV2
-        exact sorry  -- needs extendLetrec typing infrastructure
+        -- Build env invariants for Env.extendLetrec baseEnv allBindings
+        -- We don't have hrecΓ_eq or henv_fresh from the closure invariant.
+        -- Use sorry to provide the missing recΓ_eq.
+        exact sorry
       | .not_closure _ _ _ _ _ hnotcrm => exact absurd rfl (hnotcrm _ _ _ _)
     | .applyRawFn hΓ _ =>
       absurd (EnvWellTyped.lookup henv hΓ hfn) (fun h => by cases h)
