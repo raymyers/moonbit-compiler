@@ -1401,6 +1401,9 @@ def preservation
 
   | .letrecV2 heval_body => match htype with
     | .letrec hrecΓ_eq hFnames hFparams hbodies htype_body =>
+      -- Needs EnvWellTyped + ClosureInvariant + FnEnvDisjoint for
+      -- Env.extendLetrec env bindings. Each closureRecMutual value
+      -- satisfies closureRecMutualOk (constructor added in Typing.lean).
       sorry
 
   | .ifTrue heval_cond heval_so => match htype with
