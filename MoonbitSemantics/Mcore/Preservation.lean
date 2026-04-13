@@ -1196,10 +1196,13 @@ private def preservation_letrecV2_helper
     case hlen => simp [List.length_map, List.length_zip]; omega
     case hnames => intro i hi; simp [tyBindings, List.getElem_zip, List.getElem_map,
                      show i < bindings.length by simp [tyBindings, List.length_zip, List.length_map] at hi; omega]
-    case hclos => intro i hi; simp [tyBindings, List.getElem_zip, List.getElem_map,
-                     List.length_zip, List.length_map] at hi ⊢
-                  exact .closureRecMutualOk rfl henv (fun x v τ h1 h2 => hcinv x v τ h1 h2)
-                    hdisj hFnames hFparams hrecΓ_eq hbodies
+    case hclos => intro i hi
+                  have hi' : i < bindings.length := by
+                    simp [tyBindings, List.length_zip, List.length_map] at hi; omega
+                  simp [tyBindings, List.getElem_zip, List.getElem_map, hi']
+                  exact .closureRecMutualOk rfl hi' (by simp) henv
+                    (fun x v τ h1 h2 => hcinv x v τ h1 h2)
+                    hdisj hFnames hFparams henv_fresh hdist hrecΓ_eq hbodies
   · -- FnEnvDisjoint
     simp only [Env.extendLetrec]
     apply FnEnvDisjoint.extendMany_closures hdisj
@@ -1724,15 +1727,22 @@ def preservation
     | .applyClosure hΓ htype_args => by
       have cinv_func := hcinv _ _ _ hfn hΓ
       match cinv_func with
-      | .closureRecMutualOk hptys hbaseWT hbaseInv hbaseDisj hFnames hFparams hrecΓ hbodies =>
+      | .closureRecMutualOk (idx := bidx) hptys hidx hbinding hbaseWT hbaseInv
+          hbaseDisj hFnames hFparams henv_fresh_base hdist_base hrecΓ hbodies =>
         have apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
         have hvts' := hptys ▸ apr.hasTypes
         have hlen_bp := by
           have := hvts'.length_eq; simp [List.length_map] at this; omega
-        -- Use preservation_letrecV2_helper to build env invariants for extendLetrec
-        -- The body typing comes from hbodies at the specific binding index
-        -- For now, use sorry — the full proof would mirror the letrecV2 helper
-        -- but for a specific binding + bindParams. TODO: factor out.
+        -- Get body typing for THIS binding
+        have hbody_typed := hbodies bidx hidx
+        have hps : (allBindings[bidx]'hidx).2.1 = params_crm := by
+          exact congrArg Prod.fst hbinding
+        have hbd : (allBindings[bidx]'hidx).2.2 = fnBody_crm := by
+          exact congrArg Prod.snd hbinding
+        rw [hps, hbd] at hbody_typed
+        -- Needs env invariants for Env.bindParams (Env.extendLetrec baseEnv allBindings) params argVals.
+        -- Same extendLetrec construction as letrecV2 + additional bindParams.
+        -- Requires a dedicated external helper (different from letrecV2_helper).
         exact sorry
       | .not_closure _ _ _ _ _ hnotcrm => exact absurd rfl (hnotcrm _ _ _ _)
     | .applyRawFn hΓ _ =>

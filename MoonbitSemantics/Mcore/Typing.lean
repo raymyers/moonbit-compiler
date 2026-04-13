@@ -555,11 +555,16 @@ inductive ValClosureOk : Value → Mtype → FnTyTable → Prop where
   | closureRecMutualOk
       {allBindings : List (Var × List Param × Expr)} :
     (hptys : paramTys = params.map (·.ty)) →
+    (hidx : idx < allBindings.length) →
+    (hbinding : (allBindings[idx]'hidx).2 = (params, body)) →
     (hbaseWT : EnvWellTyped baseEnv Γbase) →
     (hbaseInv : ∀ x v' τ', baseEnv x = some v' → Γbase x = some τ' → ValClosureOk v' τ' F) →
     (hbaseDisj : FnEnvDisjoint baseEnv F) →
     (hFnames : ∀ j (hj : j < allBindings.length), F (allBindings[j]'hj).1 = none) →
     (hFparams : ∀ j (hj : j < allBindings.length) p, p ∈ (allBindings[j]'hj).2.1 → F p.binder = none) →
+    (henv_fresh_base : ∀ i (hi : i < allBindings.length), baseEnv (allBindings[i]'hi).1 = none) →
+    (hdist : ∀ i j (hi : i < allBindings.length) (hj : j < allBindings.length),
+      i ≠ j → (allBindings[i]'hi).1 ≠ (allBindings[j]'hj).1) →
     (hrecΓ : recΓ = TyEnv.extendMany Γbase
       ((allBindings.map Prod.fst).zip
         (allBindings.map fun (_, ps, _) => Mtype.func (ps.map Param.ty) retTy))) →
