@@ -7,4 +7,5 @@ import MoonbitSemantics.Mcore.FreeVars
 import MoonbitSemantics.Mcore.PrimTyping
 import MoonbitSemantics.Mcore.EvalPrimForm
 import MoonbitSemantics.Mcore.Preservation
+import MoonbitSemantics.Mcore.Progress
 import MoonbitSemantics.Mcore.Simulation
