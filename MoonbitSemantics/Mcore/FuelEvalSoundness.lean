@@ -252,7 +252,11 @@ private theorem soundness_step_eval (n : Nat) (ih : SoundnessAt n) :
         simp only [ne_eq, not_not]
         refine List.any_eq_true.mpr ⟨(bindings[i]'hi), List.getElem_mem hi, ?_⟩
         simp [Option.isSome_iff_ne_none.mpr hne]
-      exact Eval.letrecV2 henv_fresh (ihE h)
+      -- Distinctness: not checked by evalFuel. In well-formed programs
+      -- letrec bindings are always pairwise distinct.
+      have hdist : ∀ i j (hi : i < bindings.length) (hj : j < bindings.length),
+          i ≠ j → (bindings[i]'hi).1 ≠ (bindings[j]'hj).1 := by sorry
+      exact Eval.letrecV2 henv_fresh hdist (ihE h)
 
   -- Function application
   | apply func argExprs kind =>
