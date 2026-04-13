@@ -1827,20 +1827,25 @@ def preservation
       match cinv_func with
       | .closureRecMutualOk (idx := bidx) hptys hidx hbinding hbaseWT hbaseInv
           hbaseDisj hFnames hFparams henv_fresh_base hdist_base hrecΓ hbodies =>
+        subst hptys  -- align paramTys with params_crm.map (·.ty)
         have apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
-        have hvts' := hptys ▸ apr.hasTypes
         have hlen_bp := by
-          have := hvts'.length_eq; simp [List.length_map] at this; omega
-        -- Get body typing for THIS binding
+          have := apr.hasTypes.length_eq; simp [List.length_map] at this; omega
         have hbody_typed := hbodies bidx hidx
-        have hps : (allBindings[bidx]'hidx).2.1 = params_crm := by
-          exact congrArg Prod.fst hbinding
-        have hbd : (allBindings[bidx]'hidx).2.2 = fnBody_crm := by
-          exact congrArg Prod.snd hbinding
+        have hps : (allBindings[bidx]'hidx).2.1 = params_crm :=
+          congrArg Prod.fst hbinding
+        have hbd : (allBindings[bidx]'hidx).2.2 = fnBody_crm :=
+          congrArg Prod.snd hbinding
         rw [hps, hbd] at hbody_typed
-        -- The helper exists but type alignment between paramTys/params_crm.map
-        -- causes cascading issues. Keep sorry.
-        exact sorry
+        exact (preservation_applyClosureRecMutual_helper
+          (outcome := outcome) (s' := s') (nl' := nl') hidx hps
+          (fun ht henv' hft' hcinv' hdisj' hftc' hhft' =>
+            preservation ht heval_body henv' hft' hcinv' hdisj' hftc'
+              JoinWellTyped.empty JoinDeltaConsistent.empty_empty
+              LoopLabelConsistent.empty hhft')
+          hbody_typed apr.hasTypes hlen_bp.symm hbaseWT hbaseInv hbaseDisj
+          hFnames hFparams henv_fresh_base hdist_base hrecΓ hbodies hft hftc hhft
+          (fun i hv hτ => apr.closureOks i hv hτ)).liftFromEmptyΛ.liftFromNoneE
       | .not_closure _ _ _ _ _ hnotcrm => exact absurd rfl (hnotcrm _ _ _ _)
     | .applyRawFn hΓ _ =>
       absurd (EnvWellTyped.lookup henv hΓ hfn) (fun h => by cases h)
