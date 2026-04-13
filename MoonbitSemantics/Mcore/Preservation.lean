@@ -1124,6 +1124,104 @@ theorem loc_store_consistency
   rw [hstore] at hstore'; cases hstore'
   exact ⟨hsize', htyped'⟩
 
+/-- External helper for applyClosureRecMutual preservation.
+    Builds extendLetrec invariants, then bindParams invariants, then
+    calls preservation via IH lambda. -/
+private def preservation_applyClosureRecMutual_helper
+    {Γbase : TyEnv} {F : FnTyTable} {ft : FnTable}
+    {baseEnv : Env} {allBindings : List (Var × List Param × Expr)}
+    {retTy : Mtype} {params_crm : List Param} {fnBody_crm : Expr}
+    {argVals : List Value} {outcome : Outcome} {s' : Store} {nl' : Loc}
+    {bidx : Nat} (hidx : bidx < allBindings.length)
+    (hbinding_ps : (allBindings[bidx]'hidx).2.1 = params_crm)
+    (ih :
+      HasType (TyEnv.bindParams recΓ params_crm)
+        JoinTyEnv.empty LoopTyEnv.empty F none fnBody_crm retTy →
+      EnvWellTyped (Env.bindParams (Env.extendLetrec baseEnv allBindings) params_crm argVals)
+        (TyEnv.bindParams recΓ params_crm) →
+      FnTableWellTyped ft F →
+      ClosureInvariant (Env.bindParams (Env.extendLetrec baseEnv allBindings) params_crm argVals)
+        (TyEnv.bindParams recΓ params_crm) F →
+      FnEnvDisjoint (Env.bindParams (Env.extendLetrec baseEnv allBindings) params_crm argVals) F →
+      FnTableComplete ft F →
+      HeapFieldTyped F →
+      PresResult outcome retTy none F LoopTyEnv.empty)
+    (hbody_typed : HasType (TyEnv.bindParams recΓ params_crm)
+        JoinTyEnv.empty LoopTyEnv.empty F none fnBody_crm retTy)
+    (hvts : ValueListHasType argVals (params_crm.map (·.ty)))
+    (hlen : params_crm.length = argVals.length)
+    (hbaseWT : EnvWellTyped baseEnv Γbase)
+    (hbaseInv : ∀ x v' τ', baseEnv x = some v' → Γbase x = some τ' → ValClosureOk v' τ' F)
+    (hbaseDisj : FnEnvDisjoint baseEnv F)
+    (hFnames : ∀ j (hj : j < allBindings.length), F (allBindings[j]'hj).1 = none)
+    (hFparams : ∀ j (hj : j < allBindings.length) p,
+      p ∈ (allBindings[j]'hj).2.1 → F p.binder = none)
+    (henv_fresh_base : ∀ i (hi : i < allBindings.length), baseEnv (allBindings[i]'hi).1 = none)
+    (hdist_base : ∀ i j (hi : i < allBindings.length) (hj : j < allBindings.length),
+      i ≠ j → (allBindings[i]'hi).1 ≠ (allBindings[j]'hj).1)
+    (hrecΓ : recΓ = TyEnv.extendMany Γbase
+      ((allBindings.map Prod.fst).zip
+        (allBindings.map fun (_, ps, _) => Mtype.func (ps.map Param.ty) retTy)))
+    (hbodies : ∀ j (hj : j < allBindings.length),
+      HasType (TyEnv.bindParams recΓ ((allBindings[j]'(by omega)).2.1))
+        JoinTyEnv.empty LoopTyEnv.empty F none ((allBindings[j]'(by omega)).2.2) retTy)
+    (hft : FnTableWellTyped ft F) (hftc : FnTableComplete ft F)
+    (hhft : HeapFieldTyped F)
+    (hclos_args : ∀ i (hv : i < argVals.length) (hτ : i < (params_crm.map (·.ty)).length),
+      ValClosureOk (argVals[i]'hv) ((params_crm.map (·.ty))[i]'hτ) F) :
+    PresResult outcome retTy none F LoopTyEnv.empty := by
+  -- Build extendLetrec invariants (same as letrecV2 helper)
+  have hΓ_fresh_env := fun i hi => EnvWellTyped.env_none_Γ_none hbaseWT (henv_fresh_base i hi)
+  set tyBindings := (allBindings.map Prod.fst).zip
+    (allBindings.map fun (_, ps, _) => Mtype.func (ps.map Param.ty) retTy)
+  have htyBind_len : tyBindings.length = allBindings.length := by
+    simp [tyBindings, List.length_zip, List.length_map]
+  have htyBind_fst : ∀ i (hi : i < tyBindings.length),
+      (tyBindings[i]'hi).1 = (allBindings[i]'(by omega)).1 := by
+    intro i hi; simp [tyBindings, List.getElem_zip, List.getElem_map, show i < allBindings.length by omega]
+  have hΓ_fresh : ∀ i (hi : i < tyBindings.length), Γbase (tyBindings[i]'hi).1 = none := by
+    intro i hi; rw [htyBind_fst i hi]; exact hΓ_fresh_env i (by omega)
+  have hΓ_dist : ∀ i j (hi : i < tyBindings.length) (hj : j < tyBindings.length),
+      i ≠ j → (tyBindings[i]'hi).1 ≠ (tyBindings[j]'hj).1 := by
+    intro i j hi hj hij; rw [htyBind_fst i hi, htyBind_fst j hj]
+    exact hdist_base i j (by omega) (by omega) hij
+  -- EnvWellTyped for extendLetrec
+  have henv_ext : EnvWellTyped (Env.extendLetrec baseEnv allBindings) recΓ := by
+    rw [hrecΓ]; simp only [Env.extendLetrec]
+    apply EnvWellTyped.extendMany_preserves hbaseWT
+    case hlen => simp [List.length_map, List.length_zip]; omega
+    case hnames => intro i hi; simp [tyBindings, List.getElem_zip, List.getElem_map,
+                     show i < allBindings.length by simp [tyBindings, List.length_zip, List.length_map] at hi; omega]
+    case htypes => intro i hi; simp [tyBindings, List.getElem_zip, List.getElem_map,
+                     show i < allBindings.length by simp [tyBindings, List.length_zip, List.length_map] at hi; omega]
+                   exact ValueHasType.closureRecMutual
+  have hcinv_ext : ClosureInvariant (Env.extendLetrec baseEnv allBindings) recΓ F := by
+    rw [hrecΓ]; simp only [Env.extendLetrec]
+    apply ClosureInvariant.extendMany (fun x v τ h1 h2 => hbaseInv x v τ h1 h2)
+    case hlen => simp [List.length_map, List.length_zip]; omega
+    case hnames => intro i hi; simp [tyBindings, List.getElem_zip, List.getElem_map,
+                     show i < allBindings.length by simp [tyBindings, List.length_zip, List.length_map] at hi; omega]
+    case hclos => intro i hi
+                  have hi' : i < allBindings.length := by
+                    simp [tyBindings, List.length_zip, List.length_map] at hi; omega
+                  simp [tyBindings, List.getElem_zip, List.getElem_map, hi']
+                  exact .closureRecMutualOk rfl hi' (by simp) hbaseWT
+                    (fun x v τ h1 h2 => hbaseInv x v τ h1 h2)
+                    hbaseDisj hFnames hFparams henv_fresh_base hdist_base hrecΓ hbodies
+  have hdisj_ext : FnEnvDisjoint (Env.extendLetrec baseEnv allBindings) F := by
+    simp only [Env.extendLetrec]
+    apply FnEnvDisjoint.extendMany_closures hbaseDisj
+    intro i hi; simp [List.length_map] at hi; simp [List.getElem_map]; exact hFnames i hi
+  -- Apply bindParams on top
+  have henv_body := EnvWellTyped.bindParams_preserves henv_ext _ _ hvts hlen
+  have hcinv_body := ClosureInvariant.bindParams hcinv_ext _ _ hvts hlen
+    (fun i hv hτ => hclos_args i hv (by simp [List.length_map]; exact hτ))
+  have hdisj_body : FnEnvDisjoint
+      (Env.bindParams (Env.extendLetrec baseEnv allBindings) params_crm argVals) F := by
+    apply FnEnvDisjoint.bindParams hdisj_ext
+    intro p hp; exact hFparams bidx hidx p (hbinding_ps ▸ hp)
+  exact ih hbody_typed henv_body hft hcinv_body hdisj_body hftc hhft
+
 /-- External helper for letrecV2 preservation. Takes the IH as a lambda.
     Mirrors the old `.letrec` case but uses closureRecMutual values. -/
 private def preservation_letrecV2_helper
@@ -1740,9 +1838,8 @@ def preservation
         have hbd : (allBindings[bidx]'hidx).2.2 = fnBody_crm := by
           exact congrArg Prod.snd hbinding
         rw [hps, hbd] at hbody_typed
-        -- Needs env invariants for Env.bindParams (Env.extendLetrec baseEnv allBindings) params argVals.
-        -- Same extendLetrec construction as letrecV2 + additional bindParams.
-        -- Requires a dedicated external helper (different from letrecV2_helper).
+        -- The helper exists but type alignment between paramTys/params_crm.map
+        -- causes cascading issues. Keep sorry.
         exact sorry
       | .not_closure _ _ _ _ _ hnotcrm => exact absurd rfl (hnotcrm _ _ _ _)
     | .applyRawFn hΓ _ =>
