@@ -1124,6 +1124,43 @@ theorem loc_store_consistency
   rw [hstore] at hstore'; cases hstore'
   exact ⟨hsize', htyped'⟩
 
+/-- JoinWellTyped is monotone in Γ: Γ ⊆ Γ' → JoinWellTyped at Γ'. -/
+private theorem JoinWellTyped.mono_Γ
+    {jt : JoinTable} {Δ : JoinTyEnv} {Γ Γ' : TyEnv} {Λ : LoopTyEnv} {F : FnTyTable}
+    (hjwt : JoinWellTyped jt Δ Γ Λ F)
+    (hsub : ∀ x τ', Γ x = some τ' → Γ' x = some τ') :
+    JoinWellTyped jt Δ Γ' Λ F :=
+  fun func params jbody paramTys retTy hjt' hΔ =>
+    let ⟨hmap, hfp, Γ_def, Δ_def, Λ_def, hΓsub, hΔsub, hΛsub, hbody⟩ :=
+      hjwt func params jbody paramTys retTy hjt' hΔ
+    ⟨hmap, hfp, Γ_def, Δ_def, Λ_def,
+      fun x τ' h => hsub x τ' (hΓsub x τ' h), hΔsub, hΛsub, hbody⟩
+
+/-- extendMany preserves values at keys not in the binding list. -/
+private theorem TyEnv.extendMany_of_not_mem
+    {Γ : TyEnv} {bindings : List (Var × Mtype)} {x : Var} {τ' : Mtype}
+    (h : Γ x = some τ') (hne : ∀ b ∈ bindings, x ≠ b.1) :
+    (TyEnv.extendMany Γ bindings) x = some τ' := by
+  induction bindings generalizing Γ with
+  | nil => exact h
+  | cons b bs ih =>
+    simp only [TyEnv.extendMany, List.foldl]
+    apply ih
+    · have hxne : x ≠ b.1 := hne b (.head _)
+      simp only [TyEnv.extend, if_neg hxne]; exact h
+    · intro b' hb'; exact hne b' (List.mem_cons_of_mem _ hb')
+
+/-- Γ ⊆ TyEnv.extendMany Γ bindings when all binding names are fresh in Γ. -/
+private theorem TyEnv.extendMany_mono_fresh
+    {Γ : TyEnv} {bindings : List (Var × Mtype)}
+    (hfresh : ∀ i (hi : i < bindings.length), Γ (bindings[i]'hi).1 = none) :
+    ∀ x τ', Γ x = some τ' → (TyEnv.extendMany Γ bindings) x = some τ' := by
+  intro x τ' h
+  apply TyEnv.extendMany_of_not_mem h
+  intro b hb
+  obtain ⟨i, hi, rfl⟩ := List.mem_iff_getElem.mp hb
+  intro heq; subst heq; rw [hfresh i hi] at h; exact nomatch h
+
 /-- External helper for applyClosureRecMutual preservation.
     Builds extendLetrec invariants, then bindParams invariants, then
     calls preservation via IH lambda. -/
@@ -1157,8 +1194,6 @@ private def preservation_applyClosureRecMutual_helper
     (hFparams : ∀ j (hj : j < allBindings.length) p,
       p ∈ (allBindings[j]'hj).2.1 → F p.binder = none)
     (henv_fresh_base : ∀ i (hi : i < allBindings.length), baseEnv (allBindings[i]'hi).1 = none)
-    (hdist_base : ∀ i j (hi : i < allBindings.length) (hj : j < allBindings.length),
-      i ≠ j → (allBindings[i]'hi).1 ≠ (allBindings[j]'hj).1)
     (hrecΓ : recΓ = TyEnv.extendMany Γbase
       ((allBindings.map Prod.fst).zip
         (allBindings.map fun (_, ps, _) => Mtype.func (ps.map Param.ty) retTy)))
@@ -1181,10 +1216,6 @@ private def preservation_applyClosureRecMutual_helper
     intro i hi; simp [tyBindings, List.getElem_zip, List.getElem_map, show i < allBindings.length by omega]
   have hΓ_fresh : ∀ i (hi : i < tyBindings.length), Γbase (tyBindings[i]'hi).1 = none := by
     intro i hi; rw [htyBind_fst i hi]; exact hΓ_fresh_env i (by omega)
-  have hΓ_dist : ∀ i j (hi : i < tyBindings.length) (hj : j < tyBindings.length),
-      i ≠ j → (tyBindings[i]'hi).1 ≠ (tyBindings[j]'hj).1 := by
-    intro i j hi hj hij; rw [htyBind_fst i hi, htyBind_fst j hj]
-    exact hdist_base i j (by omega) (by omega) hij
   -- EnvWellTyped for extendLetrec
   have henv_ext : EnvWellTyped (Env.extendLetrec baseEnv allBindings) recΓ := by
     rw [hrecΓ]; simp only [Env.extendLetrec]
@@ -1207,7 +1238,7 @@ private def preservation_applyClosureRecMutual_helper
                   simp [tyBindings, List.getElem_zip, List.getElem_map, hi']
                   exact .closureRecMutualOk rfl hi' (by simp) hbaseWT
                     (fun x v τ h1 h2 => hbaseInv x v τ h1 h2)
-                    hbaseDisj hFnames hFparams henv_fresh_base hdist_base hrecΓ hbodies
+                    hbaseDisj hFnames hFparams henv_fresh_base hrecΓ hbodies
   have hdisj_ext : FnEnvDisjoint (Env.extendLetrec baseEnv allBindings) F := by
     simp only [Env.extendLetrec]
     apply FnEnvDisjoint.extendMany_closures hbaseDisj
@@ -1256,29 +1287,22 @@ private def preservation_letrecV2_helper
     (hdisj : FnEnvDisjoint env F) (hft : FnTableWellTyped ft F)
     (hftc : FnTableComplete ft F)
     (henv_fresh : ∀ i (hi : i < bindings.length), env (bindings[i]'hi).1 = none)
-    (hdist : ∀ i j (hi : i < bindings.length) (hj : j < bindings.length),
-      i ≠ j → (bindings[i]'hi).1 ≠ (bindings[j]'hj).1)
     (hjwt : JoinWellTyped jt Δ Γ Λ F) (hjdc : JoinDeltaConsistent jt Δ)
     (hllc : LoopLabelConsistent lt Λ) (hhft : HeapFieldTyped F) :
     PresResult outcome τ E F Λ := by
-  -- Same pattern as the old .letrec case (lines 1367-1404)
   have hΓ_fresh_env := fun i hi => EnvWellTyped.env_none_Γ_none henv (henv_fresh i hi)
   set tyBindings := (bindings.map Prod.fst).zip
-    (bindings.map fun (_, ps, _) => Mtype.func (ps.map Param.ty) retTy) with htyBind_def
+    (bindings.map fun (_, ps, _) => Mtype.func (ps.map Param.ty) retTy)
   have htyBind_len : tyBindings.length = bindings.length := by
     simp [tyBindings, List.length_zip, List.length_map]
   have htyBind_fst : ∀ i (hi : i < tyBindings.length),
       (tyBindings[i]'hi).1 = (bindings[i]'(by omega)).1 := by
-    intro i hi
-    simp [tyBindings, List.getElem_zip, List.getElem_map, show i < bindings.length by omega]
+    intro i hi; simp [tyBindings, List.getElem_zip, List.getElem_map, show i < bindings.length by omega]
   have hΓ_fresh : ∀ i (hi : i < tyBindings.length), Γ (tyBindings[i]'hi).1 = none := by
     intro i hi; rw [htyBind_fst i hi]; exact hΓ_fresh_env i (by omega)
-  have hΓ_dist : ∀ i j (hi : i < tyBindings.length) (hj : j < tyBindings.length),
-      i ≠ j → (tyBindings[i]'hi).1 ≠ (tyBindings[j]'hj).1 := by
-    intro i j hi hj hij; rw [htyBind_fst i hi, htyBind_fst j hj]
-    exact hdist i j (by omega) (by omega) hij
+  -- Use mono_Γ instead of weakenΓ_extendMany to avoid distinctness
   refine ih htype_body ?_ hft ?_ ?_ hftc
-    (hrecΓ_eq ▸ hjwt.weakenΓ_extendMany hΓ_fresh hΓ_dist) hjdc hllc hhft
+    (hrecΓ_eq ▸ hjwt.mono_Γ (TyEnv.extendMany_mono_fresh hΓ_fresh)) hjdc hllc hhft
   · -- EnvWellTyped
     rw [hrecΓ_eq]; simp only [Env.extendLetrec]
     apply EnvWellTyped.extendMany_preserves henv
@@ -1300,7 +1324,7 @@ private def preservation_letrecV2_helper
                   simp [tyBindings, List.getElem_zip, List.getElem_map, hi']
                   exact .closureRecMutualOk rfl hi' (by simp) henv
                     (fun x v τ h1 h2 => hcinv x v τ h1 h2)
-                    hdisj hFnames hFparams henv_fresh hdist hrecΓ_eq hbodies
+                    hdisj hFnames hFparams henv_fresh hrecΓ_eq hbodies
   · -- FnEnvDisjoint
     simp only [Env.extendLetrec]
     apply FnEnvDisjoint.extendMany_closures hdisj
@@ -1581,13 +1605,13 @@ def preservation
         apply FnEnvDisjoint.extendMany_closures hdisj
         intro i hi; simp [List.length_map] at hi; simp [List.getElem_map]; exact hFnames i hi
 
-  | .letrecV2 henv_fresh hdist heval_body => match htype with
+  | .letrecV2 henv_fresh heval_body => match htype with
     | .letrec hrecΓ_eq hFnames hFparams hbodies htype_body =>
       preservation_letrecV2_helper (outcome := outcome) (s' := s') (nl' := nl')
         (fun ht henv' hft' hcinv' hdisj' hftc' hjwt' hjdc' hllc' hhft' =>
           preservation ht heval_body henv' hft' hcinv' hdisj' hftc' hjwt' hjdc' hllc' hhft')
         hrecΓ_eq hFnames hFparams hbodies htype_body henv hcinv hdisj hft hftc
-        henv_fresh hdist hjwt hjdc hllc hhft
+        henv_fresh hjwt hjdc hllc hhft
 
   | .ifTrue heval_cond heval_so => match htype with
     | .ifSome _ htype_so _ => preservation htype_so heval_so henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
@@ -1826,7 +1850,7 @@ def preservation
       have cinv_func := hcinv _ _ _ hfn hΓ
       match cinv_func with
       | .closureRecMutualOk (idx := bidx) hptys hidx hbinding hbaseWT hbaseInv
-          hbaseDisj hFnames hFparams henv_fresh_base hdist_base hrecΓ hbodies =>
+          hbaseDisj hFnames hFparams henv_fresh_base hrecΓ hbodies =>
         subst hptys  -- align paramTys with params_crm.map (·.ty)
         have apr := preservationArgs htype_args heval_args henv hft hcinv hdisj hftc hjwt hjdc hllc hhft
         have hlen_bp := by
@@ -1844,7 +1868,7 @@ def preservation
               JoinWellTyped.empty JoinDeltaConsistent.empty_empty
               LoopLabelConsistent.empty hhft')
           hbody_typed apr.hasTypes hlen_bp.symm hbaseWT hbaseInv hbaseDisj
-          hFnames hFparams henv_fresh_base hdist_base hrecΓ hbodies hft hftc hhft
+          hFnames hFparams henv_fresh_base hrecΓ hbodies hft hftc hhft
           (fun i hv hτ => apr.closureOks i hv hτ)).liftFromEmptyΛ.liftFromNoneE
       | .not_closure _ _ _ _ _ hnotcrm => exact absurd rfl (hnotcrm _ _ _ _)
     | .applyRawFn hΓ _ =>

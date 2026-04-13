@@ -563,8 +563,6 @@ inductive ValClosureOk : Value → Mtype → FnTyTable → Prop where
     (hFnames : ∀ j (hj : j < allBindings.length), F (allBindings[j]'hj).1 = none) →
     (hFparams : ∀ j (hj : j < allBindings.length) p, p ∈ (allBindings[j]'hj).2.1 → F p.binder = none) →
     (henv_fresh_base : ∀ i (hi : i < allBindings.length), baseEnv (allBindings[i]'hi).1 = none) →
-    (hdist : ∀ i j (hi : i < allBindings.length) (hj : j < allBindings.length),
-      i ≠ j → (allBindings[i]'hi).1 ≠ (allBindings[j]'hj).1) →
     (hrecΓ : recΓ = TyEnv.extendMany Γbase
       ((allBindings.map Prod.fst).zip
         (allBindings.map fun (_, ps, _) => Mtype.func (ps.map Param.ty) retTy))) →
